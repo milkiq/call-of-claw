@@ -1,0 +1,61 @@
+schema_version: 1
+id: old_manor_mystery_compiled
+package_id: old_manor_mystery
+initial_scene: foyer
+opening: >
+  Rain taps against the manor windows as the front door opens onto a silent foyer.
+  A muddy trail crosses the tiles and stops beneath the locked study balcony.
+  What do you do?
+initial_state:
+  active_scene: foyer
+  clock:
+    id: storm_tracks
+    value: 0
+    max: 4
+  revealed_facts: []
+  known_clues: []
+  npc_stance: {}
+patch_allowlist:
+  - [active_scene]
+  - [clock, value]
+  - [revealed_facts]
+  - [known_clues]
+  - [npc_stance, "*"]
+gm_constraints:
+  - Reveal clues as observable evidence before stating conclusions.
+  - Do not name the culprit until the player has linked at least two clues.
+scenes:
+  foyer:
+    title: Rain in the Foyer
+    public_summary: >
+      Wet footprints cross the foyer tiles, a grandfather clock has stopped, and the locked study
+      balcony overlooks the room.
+    gm_only:
+      - The footprints were staged after the owner vanished.
+      - The stopped clock hides a torn appointment note.
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: Delay lets servants remove evidence.
+    transitions:
+      - to: study
+        when: The player gets access to the locked study or follows the balcony clue.
+        result_bands: [success, success_with_cost, full_success, critical_success]
+        action_keywords: [study, balcony, locked, key, 书房, 阳台, 钥匙]
+  study:
+    title: The Locked Study
+    public_summary: >
+      The study smells of extinguished candles. Papers lie scattered beside a clean rectangle on the
+      dusty desk.
+    gm_only:
+      - The missing document names the estate debt.
+      - A servant hid the document in the rain barrel.
+    default_gm_move:
+      type: reveal
+      amount: 1
+      reason: A careful search should surface one concrete clue.
+    transitions: []
+endings:
+  solved:
+    when: The player identifies the staged trail and the hidden document.
+    summary: The disappearance can be confronted with evidence.

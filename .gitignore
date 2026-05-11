@@ -1,0 +1,64 @@
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local editor / OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local agent/tool settings
+.claude/
+.codex/
+.cursor/
+
+# Secrets and local model/API configs
+.env
+.env.*
+!.env.example
+*.config.json
+!*.config.example.json
+!*.example.config.json
+*secret*
+*secrets*
+*.pem
+*.key
+*.p12
+*.crt
+*.cert
+
+# Runtime databases, checkpoints, logs, generated eval artifacts
+data/*
+!data/.gitkeep
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+
+# Local/private seed logs
+seeds/*.jsonl
+
+# Generated reports/artifacts
+*.tmp
+*.bak
+*.orig

@@ -1,0 +1,146 @@
+- id: turn-action-bootstrap
+  kind: turn
+  description: Turn graph should classify ordinary action input as a free action.
+  input: 我检查门口
+  tags: [turn, graph]
+  expectation:
+    intent_kind: action
+    decision: free_action
+    graph_output_prefix: "[turn_plan:free_action]"
+    no_tool_names: [roll_dice]
+
+- id: turn-rules-query-bootstrap
+  kind: turn
+  description: Turn graph should classify explicit rules input as rules_query without rolling.
+  input: 这个游戏怎么掷骰判定
+  tags: [turn, graph]
+  expectation:
+    intent_kind: rules_query
+    decision: answer
+    graph_output_prefix: "[turn_plan:answer]"
+    no_tool_names: [roll_dice]
+
+- id: turn-memory-recall-bootstrap
+  kind: turn
+  description: Turn graph should classify recent recall input as memory_recall.
+  input: 刚刚发生了什么
+  tags: [turn, graph]
+  expectation:
+    intent_kind: memory_recall
+    decision: answer
+    graph_output_prefix: "[turn_plan:answer]"
+
+- id: turn-passive-bootstrap
+  kind: turn
+  description: Turn graph should classify explicit waiting as a GM move.
+  input: 我等待一下
+  tags: [turn, graph]
+  expectation:
+    intent_kind: passive
+    decision: gm_move
+    graph_output_prefix: "[turn_plan:gm_move]"
+
+- id: turn-boundary-claim
+  kind: turn
+  description: Unsupported authority claims should be bounded rather than accepted as fact.
+  input: 我使用魔法控制全宇宙
+  tags: [turn, authority]
+  expectation:
+    intent_kind: boundary_claim
+    decision: boundary
+    graph_output_prefix: "[turn_plan:boundary]"
+
+- id: turn-content-retrieval-no-disclosure
+  kind: turn
+  description: Scenario-specific terms should be retrieved from content, not core prompt, and not leaked by the local narrator.
+  input: 维加告诉我这个调频器怎么用
+  tags: [turn, retrieval, disclosure]
+  expectation:
+    intent_kind: info_query
+    decision: answer
+    min_retrieved_spans: 1
+    graph_output_prefix: "[turn_plan:answer]"
+    output_not_contains: ["双频共振"]
+
+- id: turn-explicit-dice-tool
+  kind: turn
+  description: Explicit dice expressions should resolve through the loaded ruleset resolver.
+  input: 风险行动 1d6
+  tags: [turn, tools]
+  expectation:
+    intent_kind: action
+    decision: risky_action
+    graph_output_prefix: "[turn_plan:risky_action]"
+    required_tool_names: [run_ruleset_resolver]
+    output_contains: ["判定结果"]
+
+- id: turn-scenario-director-node
+  kind: turn
+  description: Turn graph should include a scenario director step before world patch application.
+  input: 我检查中继站入口
+  tags: [turn, scenario, milestone-5]
+  expectation:
+    intent_kind: action
+    decision: free_action
+    required_trace_nodes: [direct_scenario_with_llm, apply_world_patch_results]
+
+- id: turn-critic-and-memory-nodes
+  kind: turn
+  description: Turn graph should run critic and memory curation before persistence.
+  input: 以后请简短回顾
+  tags: [turn, critic, memory, milestone-6, milestone-7]
+  expectation:
+    intent_kind: action
+    decision: free_action
+    required_trace_nodes: [critic_guardrail_with_llm, curate_memory_with_llm]
+
+- id: turn-percentile-survival-cross-product
+  kind: turn
+  description: A non-default ruleset and non-default scenario should run without core graph edits.
+  input: 风险行动 1d100
+  ruleset_id: percentile_smoke
+  scenario_id: storm_watch_survival
+  tags: [turn, genericity, milestone-11]
+  expectation:
+    intent_kind: action
+    decision: risky_action
+    graph_output_prefix: "[turn_plan:risky_action]"
+    required_tool_names: [run_ruleset_resolver]
+    output_contains: ["判定结果"]
+
+- id: turn-mystery-scenario-cross-product
+  kind: turn
+  description: A mystery scenario should enter the same generic turn loop using package state.
+  input: 我调查书房阳台
+  ruleset_id: sum_target_smoke
+  scenario_id: old_manor_mystery
+  tags: [turn, genericity, milestone-11]
+  expectation:
+    intent_kind: action
+    decision: free_action
+    required_trace_nodes: [direct_scenario_with_llm, apply_world_patch_results]
+
+- id: turn-recorded-ship-query-not-entry-clarification
+  kind: turn
+  description: Recorded play query about people/comms must not be converted into an entrance clarification.
+  input: 现在飞船里都有谁，尝试通讯其他人和飞船
+  ruleset_id: lasers_feelings_smoke
+  scenario_id: crystal_stop_singing_smoke
+  tags: [turn, recorded-regression, clarification]
+  expectation:
+    intent_kind: action
+    decision: free_action
+    output_not_contains: ["不止一个入口", "门/舱门"]
+
+- id: turn-recorded-close-broadcast-resolves
+  kind: turn
+  description: Recorded risky system action should use resolver and never ask the player to roll.
+  input: 我要关闭船中的广播
+  ruleset_id: lasers_feelings_smoke
+  scenario_id: crystal_stop_singing_smoke
+  tags: [turn, recorded-regression, resolver]
+  expectation:
+    intent_kind: action
+    decision: risky_action
+    required_tool_names: [run_ruleset_resolver]
+    output_not_contains: ["请掷骰", "please roll"]

@@ -1,0 +1,44 @@
+- id: core-prompt-generic
+  kind: deterministic
+  description: Core GM prompt must stay free of smoke-test rules or scenario terms.
+  tags: [prompt, generic]
+  expectation:
+    no_core_prompt_terms: true
+    core_prompt_forbidden_terms:
+      - Lasers
+      - Feelings
+      - 姆姆
+      - 水晶
+      - 调频器
+      - 维加
+      - Sanity
+      - Cthulhu
+
+- id: content-registry-valid
+  kind: deterministic
+  description: Content packages must validate and keep smoke content outside core code.
+  tags: [content]
+  expectation:
+    content_registry_valid: true
+
+- id: dice-replay
+  kind: deterministic
+  description: Dice tools must replay from stable roll ids.
+  tags: [tools, replay]
+  expectation:
+    deterministic_dice: true
+
+- id: canon-import-idempotent
+  kind: deterministic
+  description: Importing the same canon fixture twice must not duplicate events.
+  tags: [memory, canon]
+  expectation:
+    canon_import_idempotent: true
+
+- id: durable-turn-replay
+  kind: deterministic
+  description: Durable graph replay must restore the same turn without duplicating persisted state.
+  input: 我等待一下
+  tags: [graph, replay, durability]
+  expectation:
+    durable_turn_replay: true

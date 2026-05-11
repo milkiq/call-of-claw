@@ -1,0 +1,31 @@
+schema_version: 1
+id: crystal_stop_singing_smoke
+kind: scenario
+name: Crystal Stop Singing Smoke Scenario
+description: Minimal smoke-test scenario package; not part of the core GM prompt.
+version: 0.1.0
+entrypoint: ../../../seeds/scenario.md
+visibility:
+  default: gm_only
+dependencies:
+  - lasers_feelings_smoke
+extensions:
+  - generic_gm_adjudication
+  - clue_hygiene_skill
+references:
+  - id: source_scenario
+    title: Source scenario markdown
+    path: ../../../seeds/scenario.md
+    visibility: gm_only
+    tags: [scenario, smoke]
+  - id: seed_canon_log
+    title: Seed canon log
+    path: ../../../seeds/canon-log.jsonl
+    visibility: tool_only
+    tags: [canon, smoke]
+  - id: compiled_scenario
+    title: Compiled smoke scenario
+    path: compiled.yaml
+    visibility: tool_only
+    tags: [compiled, scenario, runtime]
+tests: []

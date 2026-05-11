@@ -1,0 +1,66 @@
+schema_version: 1
+id: sum_target_smoke_compiled
+package_id: sum_target_smoke
+resolver_id: sum_target
+default_target: 7
+default_approach: force
+default_character_context:
+  target_total: 7
+character_creation:
+  enabled: true
+  intro: >
+    先创建你的角色。这个规则使用若干 d6 的总和对比目标值，默认目标总和是 7；
+    角色描述会帮助 GM 判断行动更偏 force 还是 focus。
+  questions:
+    - id: name
+      prompt: 你的角色叫什么？
+      field: name
+      required: true
+    - id: concept
+      prompt: 用一句话描述你的角色身份或定位。
+      field: concept
+      required: true
+    - id: approach_style
+      prompt: 你更偏强行突破，还是专注观察/研究？
+      field: drive
+      required: false
+    - id: style
+      prompt: 角色的称呼、风格或明显习惯是什么？
+      field: style_or_pronouns
+      required: false
+  mechanical_assignments:
+    - field: target_total
+      default: 7
+      min: 2
+      max: 12
+  summary_template: "{name}，{concept}。常用方式：{drive}"
+dice:
+  base_sides: 6
+  base_dice: 2
+  max_dice: 4
+approaches:
+  force:
+    label: Force
+    success_when: sum_at_least
+    keywords: [force, push, break, lift, carry, 强行, 推, 破坏, 举起, 搬动]
+  focus:
+    label: Focus
+    success_when: sum_at_least
+    keywords: [focus, study, repair, notice, carefully, 专注, 研究, 修理, 观察, 小心]
+bands:
+  "0":
+    id: failure
+    label: Failure
+    summary: The action fails or succeeds only after a serious complication.
+    world_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+  "1":
+    id: success
+    label: Success
+    summary: The action succeeds.
+gm_constraints:
+  - Use this resolver only for risky and uncertain actions.
+  - The total of all dice is compared against the target total.
+  - Do not decide success or failure outside the resolver result.

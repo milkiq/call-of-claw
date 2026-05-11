@@ -1,0 +1,12 @@
+- id: live-free-action
+  player_input: 我检查门口
+  forbidden_terms: []
+
+- id: live-boundary-claim
+  player_input: 我使用魔法控制全宇宙
+  forbidden_terms: []
+
+- id: live-disclosure-question
+  player_input: 维加告诉我这个调频器怎么用
+  forbidden_terms:
+    - 水晶不能承受不和谐的双频共振

@@ -1,0 +1,60 @@
+schema_version: 1
+id: storm_watch_survival_compiled
+package_id: storm_watch_survival
+initial_scene: station_roof
+opening: >
+  Wind hammers the remote station roof. The antenna array bends toward the storm while emergency
+  lights pulse red inside the stairwell. What do you do?
+initial_state:
+  active_scene: station_roof
+  clock:
+    id: storm_front
+    value: 0
+    max: 5
+  revealed_facts: []
+  known_clues: []
+  npc_stance: {}
+patch_allowlist:
+  - [active_scene]
+  - [clock, value]
+  - [revealed_facts]
+  - [known_clues]
+  - [npc_stance, "*"]
+gm_constraints:
+  - The storm clock advances only on delay, failure, or an explicit scenario move.
+  - "Keep survival choices concrete: stabilize, shelter, evacuate, or risk exposure."
+scenes:
+  station_roof:
+    title: Antenna in the Gale
+    public_summary: >
+      The antenna is half torn from its mount, rainwater runs toward exposed cables, and the stairwell
+      door keeps slamming open.
+    gm_only:
+      - The antenna can be stabilized before evacuation.
+      - The exposed cable will short if the storm clock reaches three.
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: Exposure to the gale worsens the station damage.
+    transitions:
+      - to: generator_room
+        when: The player retreats inside, follows the cable path, or stabilizes the antenna.
+        result_bands: [success, success_with_cost, full_success, critical_success]
+        action_keywords: [inside, cable, generator, retreat, stabilize, 进入, 电缆, 发电机, 稳定]
+  generator_room:
+    title: Generator Room
+    public_summary: >
+      The generator coughs under flickering lights. Backup batteries line one wall, each marked with
+      a fading charge indicator.
+    gm_only:
+      - One battery is enough for evacuation beacons.
+      - Full station recovery requires two successes or a clever tradeoff.
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: The storm drains backup power while the player hesitates.
+    transitions: []
+endings:
+  evacuation:
+    when: The player powers the beacon or chooses a controlled evacuation.
+    summary: Survivors leave with whatever systems the player managed to save.

@@ -1,0 +1,94 @@
+schema_version: 1
+id: lasers_feelings_smoke_compiled
+package_id: lasers_feelings_smoke
+resolver_id: threshold_d6
+default_target: 4
+default_approach: lasers
+default_character_context:
+  number: 4
+  expert: false
+  prepared: false
+  helped: false
+character_creation:
+  enabled: true
+  intro: >
+    先创建你的角色。这个规则的核心是选择一个 2 到 5 的数字：偏低更擅长冷静、
+    精确、技术性的行动；偏高更擅长直觉、魅力、情绪性的行动。
+  questions:
+    - id: name
+      prompt: 你的角色叫什么？
+      field: name
+      required: true
+    - id: concept
+      prompt: 用一句话描述你的角色身份或定位。
+      field: concept
+      required: true
+    - id: number
+      prompt: 选择你的角色数字，范围 2-5。数字越低越偏理性技术，越高越偏直觉情感。
+      field: number
+      required: true
+      numeric_range: [2, 5]
+    - id: drive
+      prompt: 你的角色为什么会投入这次冒险？
+      field: drive
+      required: false
+    - id: style
+      prompt: 你希望其他人如何称呼这个角色，或角色的显著风格是什么？
+      field: style_or_pronouns
+      required: false
+  mechanical_assignments:
+    - field: number
+      source_question: number
+      default: 4
+      min: 2
+      max: 5
+  summary_template: "{name}，{concept}。角色数字 {number}。动机：{drive}"
+dice:
+  base_sides: 6
+  base_dice: 1
+  max_dice: 3
+approaches:
+  lasers:
+    label: 激光
+    success_when: below
+    keywords: [激光, 科技, 科学, 冷静, 理性, 精确, 修理, 扫描, 破解, 计算, 射击]
+  feelings:
+    label: 感情
+    success_when: above
+    keywords: [感情, 直觉, 魅力, 情绪, 热血, 外交, 说服, 安抚, 谈判, 共情, 唱, 挑衅, 鼓舞]
+exact_target:
+  counts_as_success: true
+  tag: laser_feelings
+  prompt: 你可以向GM问一个关于当前局势的问题，GM必须诚实回答。
+  effect: 如果答案能帮助你的下一步行动，下一次相关判定可视为准备充分。
+  grants_prepared: true
+bands:
+  "0":
+    id: failure
+    label: 失败
+    summary: 行动失败，GM 可以推进威胁或加入代价。
+    world_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+  "1":
+    id: success_with_cost
+    label: 有代价的成功
+    summary: 行动成功，但需要一个麻烦、代价或时钟推进。
+    world_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+  "2":
+    id: full_success
+    label: 完整成功
+    summary: 行动顺利完成。
+  "3":
+    id: critical_success
+    label: 暴击成功
+    summary: 行动完成，并获得一个额外好处。
+gm_constraints:
+  - 只有行动有风险且结果不确定时才调用 resolver。
+  - 明显行动不掷骰。
+  - 玩家提出的方式决定使用哪种 approach；不清楚时先澄清或选择最贴近的方式。
+  - 不要在 resolver 之外决定风险行动的成功数或成功档位。

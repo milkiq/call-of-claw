@@ -1,0 +1,25 @@
+schema_version: 1
+id: clue_hygiene_skill
+kind: capability_skill
+name: Clue Hygiene
+description: Reusable GM capability for handling clues, reveals, and hidden information safely.
+version: 0.1.0
+entrypoint: SKILL.md
+visibility:
+  default: public
+capabilities:
+  - clue_tracking
+  - progressive_disclosure
+  - reveal_validation
+references:
+  - id: skill_instructions
+    title: Clue hygiene instructions
+    path: SKILL.md
+    visibility: public
+    tags: [skill, capability, clues, disclosure]
+disclosure:
+  advisor_manifest_first: true
+  default_access: retrieved_spans
+  require_citations_for_package_specific_decisions: true
+tests:
+  - tests/test_content_registry.py::test_capability_skill_package_is_reusable_extension

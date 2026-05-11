@@ -1,0 +1,21 @@
+schema_version: 1
+id: percentile_smoke
+kind: ruleset
+name: Percentile Smoke Rules
+description: Minimal percentile-under ruleset package for genericity tests.
+version: 0.1.0
+entrypoint: rules.md
+visibility:
+  default: public
+references:
+  - id: source_rules
+    title: Percentile smoke rules
+    path: rules.md
+    visibility: public
+    tags: [rules]
+  - id: compiled_rules
+    title: Compiled percentile rules
+    path: compiled.yaml
+    visibility: tool_only
+    tags: [compiled, rules]
+tests: []

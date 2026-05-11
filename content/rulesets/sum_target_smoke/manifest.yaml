@@ -1,0 +1,21 @@
+schema_version: 1
+id: sum_target_smoke
+kind: ruleset
+name: Sum Target Smoke Ruleset
+description: Minimal second resolver-family package for generic resolver-boundary tests.
+version: 0.1.0
+entrypoint: rules.md
+visibility:
+  default: gm_only
+references:
+  - id: source_rules
+    title: Source rules markdown
+    path: rules.md
+    visibility: gm_only
+    tags: [rules, smoke]
+  - id: compiled_ruleset
+    title: Compiled sum-target smoke ruleset
+    path: compiled.yaml
+    visibility: tool_only
+    tags: [compiled, rules, resolver]
+tests: []

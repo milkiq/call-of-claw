@@ -1,0 +1,11 @@
+schema_version: 1
+id: generic_playtest_judge
+kind: evaluator
+name: Generic Playtest Judge
+description: Evaluates a TRPG transcript and trace without assuming a particular ruleset.
+version: 0.1.0
+entrypoint: SKILL.md
+visibility:
+  default: public
+references: []
+tests: []

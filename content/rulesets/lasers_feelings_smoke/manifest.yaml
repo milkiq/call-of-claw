@@ -1,0 +1,21 @@
+schema_version: 1
+id: lasers_feelings_smoke
+kind: ruleset
+name: Lasers & Feelings Smoke Ruleset
+description: Minimal smoke-test ruleset package; not part of the core GM prompt.
+version: 0.1.0
+entrypoint: ../../../seeds/rule.md
+visibility:
+  default: gm_only
+references:
+  - id: source_rules
+    title: Source rules markdown
+    path: ../../../seeds/rule.md
+    visibility: gm_only
+    tags: [rules, smoke]
+  - id: compiled_ruleset
+    title: Compiled smoke ruleset
+    path: compiled.yaml
+    visibility: tool_only
+    tags: [compiled, rules, resolver]
+tests: []

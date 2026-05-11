@@ -1,0 +1,61 @@
+schema_version: 1
+id: percentile_smoke_compiled
+package_id: percentile_smoke
+resolver_id: percentile_under
+default_target: 55
+default_approach: careful
+character_creation:
+  enabled: true
+  intro: >
+    先创建你的角色。这个规则使用百分骰，默认目标值为 55；角色资料主要帮助 GM
+    理解你的调查方式和叙事定位。
+  questions:
+    - id: name
+      prompt: 你的角色叫什么？
+      field: name
+      required: true
+    - id: concept
+      prompt: 用一句话描述你的角色身份或专长。
+      field: concept
+      required: true
+    - id: method
+      prompt: 你更常用谨慎调查、潜行观察、修理研究，还是强行突破？
+      field: drive
+      required: false
+    - id: style
+      prompt: 角色的称呼、风格或明显习惯是什么？
+      field: style_or_pronouns
+      required: false
+  mechanical_assignments:
+    - field: percentile_target
+      default: 55
+      min: 1
+      max: 100
+  summary_template: "{name}，{concept}。常用方式：{drive}"
+dice:
+  base_sides: 100
+  base_dice: 1
+  max_dice: 1
+approaches:
+  careful:
+    label: Careful
+    success_when: below
+    keywords: [inspect, study, sneak, repair, 调查, 研究, 潜行, 修理]
+  forceful:
+    label: Forceful
+    success_when: below
+    keywords: [force, break, rush, 强行, 破坏, 冲]
+bands:
+  "0":
+    id: failure
+    label: Failure
+    summary: The action fails and the GM may apply one established pressure.
+  "1":
+    id: success
+    label: Success
+    summary: The action succeeds without adding an unlisted complication.
+gm_constraints:
+  - Percentile resolution succeeds when the d100 total is less than or equal to the target.
+  - Do not invent injuries, clocks, or clues unless a scenario patch or result band authorizes them.
+default_character_context:
+  percentile_target: 55

@@ -1,0 +1,23 @@
+schema_version: 1
+id: storm_watch_survival
+kind: scenario
+name: Storm Watch Survival
+description: Small pressure-clock survival scenario used to prove cross-scenario genericity.
+version: 0.1.0
+entrypoint: scenario.md
+visibility:
+  default: gm_only
+extensions:
+  - generic_gm_adjudication
+references:
+  - id: source_scenario
+    title: Storm watch source scenario
+    path: scenario.md
+    visibility: gm_only
+    tags: [scenario, survival]
+  - id: compiled_scenario
+    title: Compiled storm watch scenario
+    path: compiled.yaml
+    visibility: tool_only
+    tags: [compiled, scenario, runtime]
+tests: []

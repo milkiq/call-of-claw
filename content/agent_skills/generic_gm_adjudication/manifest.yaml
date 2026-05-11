@@ -1,0 +1,11 @@
+schema_version: 1
+id: generic_gm_adjudication
+kind: agent_skill
+name: Generic GM Adjudication
+description: Rules-agnostic GM workflow for intent, authority, risk, and tool planning.
+version: 0.1.0
+entrypoint: SKILL.md
+visibility:
+  default: public
+references: []
+tests: []

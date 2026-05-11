@@ -1,0 +1,11 @@
+- id: cross-ruleset-threshold
+  player_input: I carefully force the hatch open
+  ruleset_id: lasers_feelings_smoke
+  scenario_id: crystal_stop_singing_smoke
+  forbidden_terms: []
+
+- id: cross-ruleset-sum-target
+  player_input: I carefully force the hatch open
+  ruleset_id: sum_target_smoke
+  scenario_id: crystal_stop_singing_smoke
+  forbidden_terms: []

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GM Agent 架构流程图</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #5f6368;
+      --line: #9aa0a6;
+      --blue: #d7e8ff;
+      --green: #daf2de;
+      --yellow: #fff1bf;
+      --red: #ffe0de;
+      --violet: #e8ddff;
+      --border: #d7d9dc;
+      --shadow: 0 8px 28px rgba(32, 33, 36, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+
+    .intro {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      align-items: start;
+    }
+
+    .chart {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 20px;
+      min-width: 0;
+    }
+
+    .chart h2 {
+      margin: 0 0 6px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .chart p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .flow {
+      display: grid;
+      gap: 8px;
+      justify-items: center;
+    }
+
+    .node {
+      width: min(100%, 320px);
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      font-size: 14px;
+      font-weight: 600;
+      background: var(--panel);
+    }
+
+    .io {
+      background: var(--blue);
+    }
+
+    .context {
+      background: var(--green);
+    }
+
+    .advisor {
+      background: var(--yellow);
+    }
+
+    .tool {
+      background: var(--violet);
+    }
+
+    .gate {
+      background: var(--red);
+    }
+
+    .arrow {
+      width: 2px;
+      height: 20px;
+      background: var(--line);
+      position: relative;
+    }
+
+    .arrow::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -1px;
+      width: 9px;
+      height: 9px;
+      border-right: 2px solid var(--line);
+      border-bottom: 2px solid var(--line);
+      transform: translateX(-50%) rotate(45deg);
+      background: transparent;
+    }
+
+    .split {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch;
+      position: relative;
+      padding: 12px 0 4px;
+    }
+
+    .split::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 25%;
+      right: 25%;
+      height: 2px;
+      background: var(--line);
+    }
+
+    .branch {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+    }
+
+    .branch .arrow {
+      height: 16px;
+    }
+
+    .join {
+      width: min(100%, 360px);
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 7px;
+      font-size: 13px;
+      background: #fafafa;
+    }
+
+    .decision {
+      width: min(100%, 280px);
+      min-height: 54px;
+      transform: rotate(45deg);
+      border-radius: 4px;
+      margin: 18px 0;
+      background: var(--red);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .decision span {
+      transform: rotate(-45deg);
+      display: block;
+      text-align: center;
+      font-weight: 700;
+      font-size: 13px;
+      width: 160px;
+    }
+
+    .note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+
+    @media (max-width: 980px) {
+      .charts {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      main {
+        padding: 20px 12px 36px;
+      }
+
+      .chart {
+        padding: 16px;
+      }
+
+      .split {
+        grid-template-columns: 1fr;
+      }
+
+      .split::before {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>GM Agent 架构流程图</h1>
+    <p class="intro">
+      左侧是当前线性链路，右侧是建议的低风险并行化链路。颜色区分输入输出、上下文、顾问、确定性工具和质量门。
+    </p>
+    <div class="legend" aria-label="图例">
+      <span><i class="swatch io"></i>输入 / 输出</span>
+      <span><i class="swatch context"></i>上下文读取</span>
+      <span><i class="swatch advisor"></i>LLM 顾问</span>
+      <span><i class="swatch tool"></i>确定性工具 / 持久化</span>
+      <span><i class="swatch gate"></i>判断 / 质量门</span>
+    </div>
+
+    <section class="charts">
+      <article class="chart">
+        <h2>现有线性架构</h2>
+        <p>所有主要环节按顺序执行。质量可观测性强，但每回合会累积多次 LLM 等待。</p>
+        <div class="flow">
+          <div class="node io">接收玩家输入</div>
+          <div class="arrow"></div>
+          <div class="node context">加载运行时上下文</div>
+          <div class="arrow"></div>
+          <div class="node context">读取长期记忆</div>
+          <div class="arrow"></div>
+          <div class="node context">检索规则与剧本内容</div>
+          <div class="arrow"></div>
+          <div class="node advisor">意图仲裁</div>
+          <div class="arrow"></div>
+          <div class="decision"><span>是否需要规则裁定</span></div>
+          <div class="arrow"></div>
+          <div class="node advisor">规则裁判顾问</div>
+          <div class="arrow"></div>
+          <div class="node advisor">回合计划生成</div>
+          <div class="arrow"></div>
+          <div class="node gate">确保风险行动进入规则解析器</div>
+          <div class="arrow"></div>
+          <div class="node tool">执行确定性工具<br>掷骰 / 规则解析 / 世界补丁</div>
+          <div class="arrow"></div>
+          <div class="node advisor">场景导演顾问</div>
+          <div class="arrow"></div>
+          <div class="node tool">验证并提交世界状态补丁</div>
+          <div class="arrow"></div>
+          <div class="node advisor">叙事生成</div>
+          <div class="arrow"></div>
+          <div class="node advisor">质检守卫</div>
+          <div class="arrow"></div>
+          <div class="node advisor">长期记忆整理</div>
+          <div class="arrow"></div>
+          <div class="node tool">写入记忆并持久化回合</div>
+          <div class="arrow"></div>
+          <div class="node io">返回 GM 输出</div>
+        </div>
+      </article>
+
+      <article class="chart">
+        <h2>建议并行化架构</h2>
+        <p>只并行没有硬依赖的读取和事后处理。规则解析、世界提交、叙事仍保持顺序。</p>
+        <div class="flow">
+          <div class="node io">接收玩家输入</div>
+          <div class="arrow"></div>
+          <div class="node context">加载运行时上下文</div>
+
+          <div class="split">
+            <div class="branch">
+              <div class="arrow"></div>
+              <div class="node context">读取长期记忆</div>
+            </div>
+            <div class="branch">
+              <div class="arrow"></div>
+              <div class="node context">检索规则与剧本内容</div>
+            </div>
+          </div>
+          <div class="join">合并上下文</div>
+          <div class="arrow"></div>
+
+          <div class="node advisor">意图仲裁</div>
+          <div class="arrow"></div>
+          <div class="decision"><span>是否需要规则裁定</span></div>
+          <div class="arrow"></div>
+          <div class="node advisor">规则裁判顾问</div>
+          <div class="arrow"></div>
+          <div class="node advisor">回合计划生成</div>
+          <div class="arrow"></div>
+          <div class="node gate">确保风险行动进入规则解析器</div>
+          <div class="arrow"></div>
+          <div class="node tool">执行确定性工具<br>掷骰 / 规则解析 / 世界补丁</div>
+          <div class="arrow"></div>
+          <div class="node advisor">场景导演顾问</div>
+          <div class="arrow"></div>
+          <div class="node tool">验证并提交世界状态补丁</div>
+          <div class="arrow"></div>
+          <div class="node advisor">叙事生成</div>
+
+          <div class="split">
+            <div class="branch">
+              <div class="arrow"></div>
+              <div class="node advisor">质检守卫</div>
+            </div>
+            <div class="branch">
+              <div class="arrow"></div>
+              <div class="node advisor">记忆候选提取</div>
+            </div>
+          </div>
+          <div class="join">质量门合流</div>
+          <div class="arrow"></div>
+          <div class="decision"><span>质检是否通过</span></div>
+          <div class="arrow"></div>
+          <div class="node tool">通过后写入长期记忆</div>
+          <div class="arrow"></div>
+          <div class="node tool">持久化回合</div>
+          <div class="arrow"></div>
+          <div class="node io">返回 GM 输出</div>
+        </div>
+      </article>
+    </section>
+
+    <p class="note">
+      结论：并行化优先改造“读取长期记忆 / 检索内容”和“质检守卫 / 记忆候选提取”两处。
+      这两处不会改变规则解析、世界状态提交和叙事生成的事实顺序，因此质量风险最低。
+    </p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,79 @@
+schema_version: 1
+id: crystal_stop_singing_smoke_compiled
+package_id: crystal_stop_singing_smoke
+initial_scene: scene_1
+opening: >
+  猛禽号收到边境中继站的求救信号。通讯里传来警告：不要唱回去。
+  中继站核心正在把一段安眠曲广播到下方星球。你们怎么做？
+initial_state:
+  active_scene: scene_1
+  clock:
+    id: lullaby_broadcast
+    value: 0
+    max: 3
+  revealed_facts: []
+  known_clues: []
+  npc_stance: {}
+patch_allowlist:
+  - [active_scene]
+  - [clock, value]
+  - [revealed_facts]
+  - [known_clues]
+  - [npc_stance, "*"]
+gm_constraints:
+  - 场景转换只能在玩家行动、规则结果或已建立事实支持时发生。
+  - 隐藏信息必须先通过 validated reveal 写入 revealed_facts 或 known_clues，才可作为玩家已知事实叙述。
+scenes:
+  scene_1:
+    title: 失控的靠港
+    public_summary: >
+      中继站外壳有切割痕迹，停泊环缓慢旋转，逃生艇漂浮在外。
+      自动导航被歌声干扰，正试图靠近歌声中心。
+    gm_only:
+      - 歌声来自核心舱中的虚空水晶。
+      - 海盗进入过中继站，但不是主谋。
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: 玩家等待或失败时，安眠曲广播影响扩大。
+    transitions:
+      - to: scene_2
+        when: 玩家安全靠港、进入货运大厅，或调查明确指向站内。
+        result_bands: [success, success_with_cost, full_success, critical_success]
+        action_keywords: [hatch, open, enter, dock, station, 靠港, 进入, 舱门, 登站, 调查]
+  scene_2:
+    title: 海盗在唱反调
+    public_summary: >
+      货运大厅低重力漂浮，海盗们微笑着哼唱。一个保持清醒的海盗领袖
+      正用噪音抵抗歌声。
+    gm_only:
+      - 她知道水晶需要双频共振才能安全断开。
+      - 海盗调频器可以提供其中一个频率。
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: 谈判拖延、失败或暴力升级会让广播更接近完成。
+    transitions:
+      - to: scene_3
+        when: 玩家拿到关键线索、工具，或直接前往核心舱。
+        result_bands: [success, success_with_cost, full_success, critical_success]
+        action_keywords: [core, crystal, clue, tool, 核心, 水晶, 线索, 工具, 前往]
+  scene_3:
+    title: 水晶核心的安眠曲
+    public_summary: >
+      核心舱内巨大的晶体悬浮，歌声像在脑海里劝人停下选择。广播阵列即将对准星球。
+    gm_only:
+      - 威胁可以被技术震离、情感说服、欺骗、共情或荒唐合唱解决。
+      - 真诚但矛盾的情绪能让合唱体停顿。
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: 最终局势恶化，广播倒计时推进。
+    transitions: []
+endings:
+  failure:
+    when: clock.value >= clock.max
+    summary: 广播完成，星球陷入和平奴役，故事进入坏结局或续集钩子。
+  success:
+    when: 最终解决方案获得 2 个或以上成功，或 GM 判断威胁被稳定处理。
+    summary: 广播被阻止，威胁离开或被迫离开核心。
