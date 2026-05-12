@@ -1,11 +1,14 @@
+import re
 from pathlib import Path
 
 from trpg_agent.graph.build_turn_graph import (
     _micro_gate_context,
+    _routing_from_micro_gates,
     apply_world_patch_results,
     build_llm_adjudication_node,
     build_llm_micro_gates_node,
     build_llm_narration_node,
+    build_llm_scenario_director_node,
     build_parallel_review_and_memory_node,
     build_turn_graph,
     critic_guardrail_locally,
@@ -189,7 +192,8 @@ def test_non_entry_clarification_uses_generic_target_text() -> None:
         }
     )
 
-    assert "具体对象" in result["turn_plan"]["narration_brief"]
+    assert "specific person" in result["turn_plan"]["narration_brief"]
+    assert not re.search(r"[\u4e00-\u9fff]", result["turn_plan"]["narration_brief"])
     assert "不止一个入口" not in result["turn_plan"]["narration_brief"]
 
 
@@ -339,6 +343,96 @@ def test_micro_gates_fallback_does_not_keyword_route_risk() -> None:
     assert result["micro_gate_results"]["risk_micro_gate"]["risky"] is False
 
 
+def test_micro_gate_target_ambiguity_without_clarify_does_not_override_route() -> None:
+    result = _routing_from_micro_gates(
+        {},
+        {
+            "authority_micro_gate": {
+                "allowed": True,
+                "boundary": False,
+                "needs_clarification": False,
+                "reason": "Authority is valid.",
+            },
+            "intent_micro_gate": {
+                "intent": {
+                    "kind": "action",
+                    "confidence": 0.8,
+                    "reason": "The player is asking for visible feedback.",
+                },
+                "route": "free_action",
+                "allow_direct_answer": False,
+                "needs_scenario_director": True,
+                "reason": "Proceed with a bounded visible response.",
+            },
+            "risk_micro_gate": {
+                "risky": False,
+                "risk": "none",
+                "needs_rules_resolution": False,
+                "reason": "No uncertain risky outcome is being resolved.",
+            },
+            "target_micro_gate": {
+                "ambiguous": True,
+                "needs_clarification": False,
+                "clarification_question": None,
+                "reason": "Several visible details exist, but safe visible feedback can proceed.",
+            },
+            "memory_recall_micro_gate": {
+                "needs_memory_recall": False,
+                "reason": "No memory recall requested.",
+            },
+        },
+    )
+
+    assert result["route"] == "free_action"
+    assert result["needs_scenario_director"] is True
+    assert result["intent"]["kind"] == "action"
+
+
+def test_micro_gate_answer_route_can_request_scenario_director() -> None:
+    result = _routing_from_micro_gates(
+        {},
+        {
+            "authority_micro_gate": {
+                "allowed": True,
+                "boundary": False,
+                "needs_clarification": False,
+                "reason": "Authority is valid.",
+            },
+            "intent_micro_gate": {
+                "intent": {
+                    "kind": "info_query",
+                    "confidence": 0.85,
+                    "reason": "The player asks for current visible context.",
+                },
+                "route": "answer",
+                "allow_direct_answer": True,
+                "needs_scenario_director": True,
+                "reason": "Answer should include visible scene context.",
+            },
+            "risk_micro_gate": {
+                "risky": False,
+                "risk": "none",
+                "needs_rules_resolution": False,
+                "reason": "No risky action.",
+            },
+            "target_micro_gate": {
+                "ambiguous": False,
+                "needs_clarification": False,
+                "clarification_question": None,
+                "reason": "No blocking target ambiguity.",
+            },
+            "memory_recall_micro_gate": {
+                "needs_memory_recall": False,
+                "reason": "No memory recall requested.",
+            },
+        },
+    )
+
+    assert result["route"] == "answer"
+    assert result["needs_scenario_director"] is True
+    assert result["allow_direct_answer"] is True
+
+
 def test_micro_gates_adjudication_skips_core_gm_plan_call() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
@@ -408,7 +502,8 @@ def test_pending_rule_opportunity_blocks_new_risky_resolution() -> None:
 
     assert result["turn_plan"]["decision"] == "clarify"
     assert result["tool_requests"] == []
-    assert "待使用的规则机会" in result["turn_plan"]["narration_brief"]
+    assert "pending rules-granted opportunity" in result["turn_plan"]["narration_brief"]
+    assert not re.search(r"[\u4e00-\u9fff]", result["turn_plan"]["narration_brief"])
     assert not any(
         request.get("tool_name") == "run_ruleset_resolver"
         for request in result["turn_plan"]["tool_requests"]
@@ -727,7 +822,8 @@ def test_single_turn_advisor_clarification_is_player_facing() -> None:
     )
 
     assert result["turn_plan"]["decision"] == "clarify"
-    assert "具体地点" in result["final_output"]
+    assert not re.search(r"[\u4e00-\u9fff]", result["turn_plan"]["narration_brief"])
+    assert "具体对象" in result["final_output"]
     assert "Ask the player" not in result["final_output"]
 
 
@@ -901,6 +997,7 @@ def test_rules_advice_clarification_prevents_ambiguous_approach_roll() -> None:
     )
 
     assert result["turn_plan"]["decision"] == "clarify"
+    assert not re.search(r"[\u4e00-\u9fff]", result["turn_plan"]["narration_brief"])
     assert result["tool_requests"] == []
     assert result["tool_results"] == []
     assert "技术扫描" in result["final_output"]
@@ -1340,7 +1437,7 @@ def test_failed_required_resolution_blocks_llm_narration() -> None:
         }
     )
 
-    assert "结果还没落定" in result["final_output"]
+    assert "outcome is not resolved yet" in result["final_output"]
     assert "不建立行动结果" not in result["final_output"]
     event = result["trace_events"][-1]
     assert event["node"] == "narrate_with_llm"
@@ -1388,6 +1485,27 @@ def test_narration_appends_missing_resolver_dice_result() -> None:
 
     assert "Roll: 2d6 -> [4, 2], total 6." in result["final_output"]
     assert result["narration_plan"]["final_text"] == result["final_output"]
+
+
+def test_compact_narration_contract_accepts_text_only_output() -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    node = build_llm_narration_node(
+        FakeListChatModel(responses=['{"text": "You keep pressure on the visible problem."}'])
+    )
+
+    result = node(
+        {
+            "player_input": "I keep working on it.",
+            "turn_plan": {"decision": "free_action"},
+            "tool_results": [],
+            "trace_events": [],
+            "advisor_contract_mode": "compact",
+        }
+    )
+
+    assert result["final_output"] == "You keep pressure on the visible problem."
+    assert result["narration_plan"]["memory_candidates"] == []
 
 
 def test_intent_arbiter_allows_question_without_keyword_fallback() -> None:
@@ -1579,7 +1697,7 @@ def test_durable_turn_graph_uses_sqlite_checkpointer_and_persists_metadata(tmp_p
     store = SqliteStore(sqlite_path)
     trace = store.get_turn("t1")["trace"]
     assert checkpoint_path_for(sqlite_path).exists()
-    assert result["runtime_metadata"]["graph_version"] == "turn-graph-v1"
+    assert result["runtime_metadata"]["graph_version"] == "turn-graph-v2"
     assert trace["runtime_metadata"]["checkpoint_mode"] == "sqlite"
     assert trace["runtime_metadata"]["model"]["provider"] == "test"
     assert trace["runtime_metadata"]["resolver_registry_version"] == "resolver-registry-v1"
@@ -1731,8 +1849,6 @@ def test_llm_scenario_director_validates_and_applies_package_patches(tmp_path) -
 def test_scenario_director_limits_dense_observation_reveals(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_scenario_director_node
-
     node = build_llm_scenario_director_node(
         FakeListChatModel(
             responses=[
@@ -1786,10 +1902,52 @@ def test_scenario_director_limits_dense_observation_reveals(tmp_path) -> None:
     assert "progressive_disclosure_limit_one_reveal_per_turn" in reasons
 
 
-def test_scenario_director_accepts_typed_clue_patch_alias(tmp_path) -> None:
+def test_scenario_director_runs_for_answer_when_route_requests_context(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_scenario_director_node
+    node = build_llm_scenario_director_node(
+        FakeListChatModel(
+            responses=[
+                """
+                {
+                  "decision": "no_change",
+                  "proposed_patches": [],
+                  "player_visible_context": "A public warning light is active.",
+                  "gm_only_reason": "Answer route requested visible scene context.",
+                  "citations": []
+                }
+                """
+            ]
+        )
+    )
+
+    result = node(
+        {
+            "player_input": "What do I see right now?",
+            "session_id": "answer-scenario-session",
+            "turn_id": "answer-scenario-turn",
+            "sqlite_path": str(tmp_path / "answer-scenario.sqlite"),
+            "scenario_id": "crystal_stop_singing_smoke",
+            "content_dir": str(Path.cwd() / "content"),
+            "routing_decision": {
+                "route": "answer",
+                "needs_scenario_director": True,
+            },
+            "turn_plan": {"decision": "answer"},
+            "world_projection": {"active_scene": "scene_1"},
+            "tool_results": [],
+            "trace_events": [],
+        }
+    )
+
+    assert result["scenario_director"]["player_visible_context"] == (
+        "A public warning light is active."
+    )
+    assert result["trace_events"][-1].get("skipped") is not True
+
+
+def test_scenario_director_accepts_typed_clue_patch_alias(tmp_path) -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
     node = build_llm_scenario_director_node(
         FakeListChatModel(

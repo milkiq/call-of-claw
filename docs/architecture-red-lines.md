@@ -24,6 +24,9 @@ compiled package.
   the LLM tries to answer directly or apply a patch.
 - No hidden information leakage. GM-only spans can guide reasoning, but player-facing narration must
   expose only what play has established.
+- LLM-facing instruction prompts and framework-generated internal advisor fields must be English.
+  Player input, retrieved content, and content-package data may be multilingual; final
+  player-facing text must match the player's language.
 - No framework-level defaults that silently encode one ruleset. If a resolver needs target numbers,
   exact-target behavior, or approach keywords, those values must be in compiled ruleset content.
 - No scenario director patch becomes durable until validated against the loaded scenario package's

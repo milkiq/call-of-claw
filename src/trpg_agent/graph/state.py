@@ -19,6 +19,7 @@ class GraphState(TypedDict, total=False):
     parallel_review_mode: bool
     single_turn_advisor_mode: bool
     micro_gates_mode: bool
+    advisor_contract_mode: str
     runtime_metadata: dict[str, Any]
     checkpoint_mode: str
     replayed_turn: bool

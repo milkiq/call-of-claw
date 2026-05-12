@@ -25,6 +25,9 @@ operation, specialist advisor agents, memory, evaluation, and generic play quali
   bypass resolver calls with direct world patches or prose success.
 - GM-only content may be used for GM reasoning, but player-facing output must not reveal it unless
   play has established access.
+- LLM-facing instruction prompts and framework-generated internal advisor fields must be English.
+  Player input, retrieved content, and content-package data may be multilingual; final
+  player-facing text must match the player's language.
 - Tests and content packages may contain smoke-test terms. `src/trpg_agent` must not.
 - Offline turn eval must use fake advisor/fixture responses rather than relying on core graph
   keyword guessing.

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from trpg_agent.eval.scorecard import EvalFinding, EvalResult, EvalScorecard
 from trpg_agent.langchain.structured import invoke_structured_with_repair
 
-JUDGE_PROMPT_VERSION = "generic-trpg-judge-v1"
+JUDGE_PROMPT_VERSION = "generic-trpg-judge-v2"
 
 JUDGE_SYSTEM_PROMPT = """You are a generic TRPG playtest judge.
 
@@ -21,6 +21,7 @@ turn-level or trace-level issues.
 
 Use findings only for actionable defects. Do not put strengths, confirmations, correct behavior, or
 positive observations in findings; mention those only in the summary.
+Write summary and findings in English, even when the transcript or evidence is multilingual.
 """
 
 JUDGE_PROMPT = ChatPromptTemplate.from_messages(

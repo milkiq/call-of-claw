@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,6 +19,68 @@ from trpg_agent.graph.state import GraphState
 
 def checkpoint_path_for(sqlite_path: Path) -> Path:
     return sqlite_path.with_name(f"{sqlite_path.stem}.checkpoints.sqlite")
+
+
+def delete_turn_graph_checkpoints(
+    sqlite_path: Path,
+    *,
+    session_ids: list[str] | None = None,
+    all_sessions: bool = False,
+) -> dict[str, int]:
+    checkpoint_path = checkpoint_path_for(sqlite_path)
+    if not checkpoint_path.exists():
+        return {"checkpoints": 0, "writes": 0}
+    if not all_sessions and not session_ids:
+        return {"checkpoints": 0, "writes": 0}
+    counts = {"checkpoints": 0, "writes": 0}
+    with sqlite3.connect(checkpoint_path) as conn:
+        if all_sessions:
+            for table in ("writes", "checkpoints"):
+                counts[table] = _delete_checkpoint_rows(conn, table)
+            return counts
+        for session_id in list(dict.fromkeys(session_ids or [])):
+            for table in ("writes", "checkpoints"):
+                counts[table] += _delete_checkpoint_rows(conn, table, session_id=session_id)
+    return counts
+
+
+def _delete_checkpoint_rows(
+    conn: sqlite3.Connection,
+    table: str,
+    *,
+    session_id: str | None = None,
+) -> int:
+    if not _checkpoint_table_exists(conn, table):
+        return 0
+    if session_id is None:
+        return _deleted_count(conn.execute(f"DELETE FROM {table}"))
+    return _deleted_count(
+        conn.execute(
+            f"""
+            DELETE FROM {table}
+            WHERE thread_id = ?
+               OR thread_id LIKE ?
+            """,
+            (session_id, f"{session_id}:%"),
+        )
+    )
+
+
+def _checkpoint_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name = ?
+        """,
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _deleted_count(cursor: sqlite3.Cursor) -> int:
+    return max(0, int(cursor.rowcount or 0))
 
 
 def turn_graph_invoke_config(state: Mapping[str, Any]) -> dict[str, dict[str, str]]:

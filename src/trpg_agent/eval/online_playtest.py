@@ -18,7 +18,7 @@ from trpg_agent.graph.runtime import durable_turn_graph, invoke_turn_graph
 from trpg_agent.langchain.structured import invoke_structured_with_repair
 from trpg_agent.memory.store import SqliteStore
 
-PLAYER_SIMULATOR_PROMPT_VERSION = "player-simulator-v1"
+PLAYER_SIMULATOR_PROMPT_VERSION = "player-simulator-v2"
 
 
 class PlayerTurnDecision(BaseModel):
@@ -40,7 +40,8 @@ specific questions when needed, take risks when the fiction calls for it, and pu
 forward.
 
 Do not use hidden GM knowledge. Do not evaluate the system. Do not write GM narration. Return a
-concrete first-person player action in the same language as the recent transcript.
+concrete first-person player action in the same language as the recent transcript. Write
+intent_summary in English.
 """.strip(),
         ),
         (
@@ -67,6 +68,7 @@ def run_online_playtest(
     single_turn_advisor: bool = False,
     micro_gates: bool = False,
     parallel_review: bool = False,
+    advisor_contracts: Literal["legacy", "compact"] = "legacy",
     session_id: str | None = None,
     ruleset_id: str | None = None,
     scenario_id: str | None = None,
@@ -88,7 +90,7 @@ def run_online_playtest(
     smoke_fast_path = _online_smoke_fast_path(
         player_mode=player_mode,
         turns=turns,
-    ) and not single_turn_advisor and not micro_gates
+    ) and not single_turn_advisor and not micro_gates and advisor_contracts == "legacy"
 
     with durable_turn_graph(sqlite_path=config.sqlite_path, model=model) as graph:
         for index in range(1, turns + 1):
@@ -121,6 +123,7 @@ def run_online_playtest(
                     "single_turn_advisor_mode": single_turn_advisor,
                     "micro_gates_mode": micro_gates,
                     "parallel_review_mode": parallel_review,
+                    "advisor_contract_mode": advisor_contracts,
                     "model_metadata": model_metadata or {},
                 },
             )
@@ -158,6 +161,7 @@ def run_online_playtest(
                 "single_turn_advisor_mode": single_turn_advisor,
                 "micro_gates_mode": micro_gates,
                 "parallel_review_mode": parallel_review,
+                "advisor_contract_mode": advisor_contracts,
                 "model_metadata": model_metadata or {},
             },
         )
@@ -230,6 +234,7 @@ def run_online_playtest(
             "single_turn_advisor": str(single_turn_advisor),
             "micro_gates": str(micro_gates),
             "parallel_review": str(parallel_review),
+            "advisor_contracts": advisor_contracts,
             "per_call_timeout_seconds": str(per_call_timeout_seconds or ""),
             "session_id": play_session_id,
             "turns": str(turns),
@@ -535,6 +540,20 @@ def _online_findings_from_metrics(metrics: Any) -> list[EvalFinding]:
                 message="Online playtest produced consecutive repeated normalized outputs.",
                 evidence=str(metrics.consecutive_repeated_outputs),
                 suggested_area="graph.output",
+            )
+        )
+    if getattr(metrics, "first_turn_clarification", False):
+        findings.append(
+            EvalFinding(
+                case_id="online-playtest-first-turn-clarification",
+                dimension="pacing",
+                severity="medium",
+                message=(
+                    "The initial online observation turn asked for clarification instead of "
+                    "providing grounded visible situation feedback."
+                ),
+                evidence=f"clarification_rate={getattr(metrics, 'clarification_rate', 0.0):.2f}",
+                suggested_area="graph.routing",
             )
         )
     if metrics.requested_turns >= 10 and metrics.max_repeated_output_ratio > 0.2:

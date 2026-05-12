@@ -24,6 +24,7 @@ from trpg_agent.app.config import load_config
 from trpg_agent.content.compiled import load_compiled_ruleset
 from trpg_agent.content.packages import PackageKind
 from trpg_agent.content.registry import ContentRegistry
+from trpg_agent.eval.advisor_metrics import compare_advisor_metrics, summarize_advisor_metrics
 from trpg_agent.eval.judge import run_llm_judge, run_static_quality_gate
 from trpg_agent.eval.live import run_live_eval
 from trpg_agent.eval.online_playtest import run_online_playtest
@@ -33,7 +34,12 @@ from trpg_agent.eval.report import build_quality_report_from_store
 from trpg_agent.eval.roadmap import derive_roadmap_from_store, write_roadmap_yaml
 from trpg_agent.eval.runner import run_eval_cases
 from trpg_agent.eval.scorecard import EvalFinding, EvalResult, score_from_findings
-from trpg_agent.graph.runtime import durable_turn_graph, invoke_turn_graph, stream_turn_graph
+from trpg_agent.graph.runtime import (
+    delete_turn_graph_checkpoints,
+    durable_turn_graph,
+    invoke_turn_graph,
+    stream_turn_graph,
+)
 from trpg_agent.langchain.models import build_chat_model, describe_model, load_model_config
 from trpg_agent.langchain.structured import invoke_structured_with_repair
 from trpg_agent.langchain.tracing import configure_langsmith
@@ -359,6 +365,33 @@ def eval_quality_report(
     eval_report(limit=limit)
 
 
+@eval_app.command("advisor-metrics")
+def eval_advisor_metrics(
+    session_id: Annotated[str | None, typer.Option("--session-id")] = None,
+    compare: Annotated[list[str] | None, typer.Option("--compare")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Summarize advisor latency and prompt/response character diagnostics."""
+    config = load_config()
+    store = SqliteStore(config.sqlite_path)
+    store.migrate()
+    compare_ids = list(compare or [])
+    if compare_ids:
+        if len(compare_ids) != 2:
+            console.print("[red]--compare requires exactly two session ids.[/red]")
+            raise typer.Exit(2)
+        payload = compare_advisor_metrics(store, compare_ids[0], compare_ids[1])
+    else:
+        if not session_id:
+            console.print("[red]Provide --session-id or --compare twice.[/red]")
+            raise typer.Exit(2)
+        payload = summarize_advisor_metrics(store, session_id)
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(json.dumps(payload, ensure_ascii=False, indent=2), markup=False)
+
+
 @eval_app.command("long-play")
 def eval_long_play(
     turns: Annotated[int, typer.Option("--turns")] = 50,
@@ -390,6 +423,7 @@ def eval_online_playtest(
     single_turn_advisor: Annotated[bool, typer.Option("--single-turn-advisor")] = False,
     micro_gates: Annotated[bool, typer.Option("--micro-gates")] = False,
     parallel_review: Annotated[bool, typer.Option("--parallel-review")] = False,
+    advisor_contracts: Annotated[str, typer.Option("--advisor-contracts")] = "legacy",
     session_id: Annotated[str | None, typer.Option("--session-id")] = None,
     ruleset_id: Annotated[str | None, typer.Option("--ruleset-id")] = None,
     scenario_id: Annotated[str | None, typer.Option("--scenario-id")] = None,
@@ -397,6 +431,7 @@ def eval_online_playtest(
 ) -> None:
     """Run an online GM long-play test and write the full transcript."""
     config = load_config()
+    advisor_contracts = _normalize_advisor_contracts(advisor_contracts)
     try:
         model_config = load_model_config(config.root_dir / "llm.config.json")
         configure_langsmith(
@@ -410,6 +445,7 @@ def eval_online_playtest(
                 "single_turn_advisor": str(single_turn_advisor),
                 "micro_gates": str(micro_gates),
                 "parallel_review": str(parallel_review),
+                "advisor_contracts": advisor_contracts,
             },
         )
         model = build_chat_model(model_config)
@@ -426,6 +462,7 @@ def eval_online_playtest(
             single_turn_advisor=single_turn_advisor,
             micro_gates=micro_gates,
             parallel_review=parallel_review,
+            advisor_contracts=advisor_contracts,
             session_id=session_id,
             ruleset_id=ruleset_id,
             scenario_id=scenario_id,
@@ -545,12 +582,17 @@ def session_start(
 
 
 @session_app.command("list")
-def session_list() -> None:
+def session_list(
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
     """List known playable sessions."""
     config = load_config()
     store = SqliteStore(config.sqlite_path)
     store.migrate()
-    sessions = store.list_sessions()
+    sessions = store.list_session_summaries()
+    if json_output:
+        typer.echo(json.dumps({"sessions": sessions}, ensure_ascii=False, indent=2))
+        return
     if not sessions:
         console.print("No sessions.")
         return
@@ -560,10 +602,98 @@ def session_list() -> None:
                 f"{session['id']} "
                 f"ruleset={session.get('ruleset_id') or '-'} "
                 f"scenario={session.get('scenario_id') or '-'} "
+                f"turns={session.get('turn_count', 0)} "
+                f"memories={session.get('memory_count', 0)} "
+                f"state={'yes' if session.get('has_state') else 'no'} "
                 f"updated={session.get('updated_at')}"
             ),
             markup=False,
         )
+
+
+@session_app.command("delete")
+def session_delete(
+    session_ids: Annotated[
+        list[str] | None,
+        typer.Option("--session-id", help="Session id to delete. May be repeated."),
+    ] = None,
+    all_sessions: Annotated[bool, typer.Option("--all")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Delete playable session data while preserving eval runs and exported files."""
+    ids = list(dict.fromkeys(session_ids or []))
+    if all_sessions and ids:
+        console.print("[red]Use either --all or --session-id, not both.[/red]")
+        raise typer.Exit(2)
+    if not all_sessions and not ids:
+        console.print("[red]Provide --session-id or --all.[/red]")
+        raise typer.Exit(2)
+
+    config = load_config()
+    store = SqliteStore(config.sqlite_path)
+    store.migrate()
+    existing = store.list_session_summaries()
+    existing_ids = {str(session["id"]) for session in existing}
+    targets = existing if all_sessions else [
+        session for session in existing if str(session["id"]) in ids
+    ]
+    missing = (
+        []
+        if all_sessions
+        else [session_id for session_id in ids if session_id not in existing_ids]
+    )
+    if missing and not json_output:
+        console.print(f"Missing sessions: {', '.join(missing)}", markup=False)
+    if not targets:
+        payload = {"deleted": False, "reason": "no matching sessions", "missing": missing}
+        if json_output:
+            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            console.print("No matching sessions to delete.", markup=False)
+        return
+
+    target_ids = [str(session["id"]) for session in targets]
+    if not yes:
+        label = "all sessions" if all_sessions else ", ".join(target_ids)
+        confirmed = typer.confirm(
+            f"Delete {label} and associated turns, memory, state, dice, advisor, critic, "
+            "world patch, canon, and checkpoint data?",
+            default=False,
+        )
+        if not confirmed:
+            raise typer.Exit(1)
+
+    delete_counts = (
+        store.delete_all_sessions() if all_sessions else store.delete_sessions(target_ids)
+    )
+    checkpoint_counts = delete_turn_graph_checkpoints(
+        config.sqlite_path,
+        session_ids=None if all_sessions else target_ids,
+        all_sessions=all_sessions,
+    )
+    payload = {
+        "deleted": True,
+        "all": all_sessions,
+        "session_ids": target_ids,
+        "missing": missing,
+        "database": delete_counts,
+        "checkpoints": checkpoint_counts,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(f"Deleted sessions: {', '.join(target_ids)}", markup=False)
+    console.print(
+        "Database rows: "
+        + ", ".join(f"{key}={value}" for key, value in delete_counts.items()),
+        markup=False,
+    )
+    console.print(
+        "Checkpoint rows: "
+        + ", ".join(f"{key}={value}" for key, value in checkpoint_counts.items()),
+        markup=False,
+    )
 
 
 @session_app.command("recap")
@@ -734,6 +864,7 @@ def _build_play_model(
     micro_gates: bool,
     single_turn_advisor: bool = False,
     parallel_review: bool = False,
+    advisor_contracts: str = "legacy",
 ) -> tuple[BaseChatModel | None, dict[str, str]]:
     if not use_llm:
         return None, {}
@@ -749,6 +880,7 @@ def _build_play_model(
             "micro_gates": str(micro_gates),
             "single_turn_advisor": str(single_turn_advisor),
             "parallel_review": str(parallel_review),
+            "advisor_contracts": advisor_contracts,
         },
     )
     return build_chat_model(model_config), model_metadata
@@ -766,6 +898,7 @@ def _run_play_turn(
     micro_gates: bool,
     single_turn_advisor: bool,
     parallel_review: bool,
+    advisor_contracts: str,
     model_metadata: dict[str, str],
     progress: GraphProgressReporter | None = None,
 ) -> dict[str, Any]:
@@ -781,6 +914,7 @@ def _run_play_turn(
         "micro_gates_mode": micro_gates,
         "single_turn_advisor_mode": single_turn_advisor,
         "parallel_review_mode": parallel_review,
+        "advisor_contract_mode": advisor_contracts,
         "checkpoint_mode": "sqlite",
         "model_metadata": model_metadata,
     }
@@ -813,6 +947,7 @@ def _run_interactive_play_loop(
     micro_gates: bool,
     single_turn_advisor: bool,
     parallel_review: bool,
+    advisor_contracts: str,
     progress_enabled: bool,
     json_output: bool,
     ruleset_id: str | None,
@@ -838,6 +973,7 @@ def _run_interactive_play_loop(
         micro_gates=micro_gates,
         single_turn_advisor=single_turn_advisor,
         parallel_review=parallel_review,
+        advisor_contracts=advisor_contracts,
     )
 
     had_state = store.get_session_state(resolved_session_id) is not None
@@ -909,6 +1045,7 @@ def _run_interactive_play_loop(
                         micro_gates=micro_gates,
                         single_turn_advisor=single_turn_advisor,
                         parallel_review=parallel_review,
+                        advisor_contracts=advisor_contracts,
                         model_metadata=model_metadata,
                         progress=reporter,
                     )
@@ -924,6 +1061,14 @@ def _run_interactive_play_loop(
 def _print_interactive_help() -> None:
     console.print("Commands: /help, /recap, /session, /quit", markup=False)
     console.print("Type any other text as your character's action.", markup=False)
+
+
+def _normalize_advisor_contracts(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in {"legacy", "compact"}:
+        console.print("[red]--advisor-contracts must be 'legacy' or 'compact'.[/red]")
+        raise typer.Exit(2)
+    return normalized
 
 
 def _print_session_recap(store: SqliteStore, session_id: str) -> None:
@@ -1153,6 +1298,7 @@ def play(
     micro_gates: Annotated[bool, typer.Option("--micro-gates")] = False,
     single_turn_advisor: Annotated[bool, typer.Option("--single-turn-advisor")] = False,
     parallel_review: Annotated[bool, typer.Option("--parallel-review")] = False,
+    advisor_contracts: Annotated[str, typer.Option("--advisor-contracts")] = "legacy",
     local: Annotated[bool, typer.Option("--local")] = False,
     progress: Annotated[bool, typer.Option("--progress/--no-progress")] = True,
     json_output: Annotated[bool, typer.Option("--json")] = False,
@@ -1161,6 +1307,7 @@ def play(
     scenario_id: Annotated[str | None, typer.Option("--scenario-id")] = None,
 ) -> None:
     """Run one turn, or enter an interactive play loop when --input is omitted."""
+    advisor_contracts = _normalize_advisor_contracts(advisor_contracts)
     if player_input is None:
         _run_interactive_play_loop(
             session_id=session_id,
@@ -1168,6 +1315,7 @@ def play(
             micro_gates=True,
             single_turn_advisor=single_turn_advisor,
             parallel_review=parallel_review,
+            advisor_contracts=advisor_contracts,
             progress_enabled=progress,
             json_output=json_output,
             ruleset_id=ruleset_id,
@@ -1195,6 +1343,7 @@ def play(
         micro_gates=micro_gates,
         single_turn_advisor=single_turn_advisor,
         parallel_review=parallel_review,
+        advisor_contracts=advisor_contracts,
     )
     try:
         with durable_turn_graph(sqlite_path=config.sqlite_path, model=model) as graph:
@@ -1210,6 +1359,7 @@ def play(
                     micro_gates=micro_gates,
                     single_turn_advisor=single_turn_advisor,
                     parallel_review=parallel_review,
+                    advisor_contracts=advisor_contracts,
                     model_metadata=model_metadata,
                     progress=reporter,
                 )

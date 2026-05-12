@@ -16,7 +16,7 @@ from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.content.retrieval import search_registry_text
 from trpg_agent.content.visibility import AccessMode
 from trpg_agent.graph.state import GraphState
-from trpg_agent.langchain.advisors import AdvisorRole, invoke_advisor
+from trpg_agent.langchain.advisors import AdvisorContractMode, AdvisorRole, invoke_advisor
 from trpg_agent.langchain.prompts import (
     AUTHORITY_MICRO_GATE_PROMPT_VERSION,
     CORE_GM_PROMPT,
@@ -54,6 +54,9 @@ from trpg_agent.langchain.structured import (
     ToolRequest,
     ToolResult,
     TurnPlan,
+    adapt_compact_output,
+    compact_response_contract,
+    compact_schema_for,
     invoke_structured_with_repair,
 )
 from trpg_agent.langchain.tools import build_langchain_tools
@@ -70,7 +73,7 @@ from trpg_agent.tools.content import load_content_span, search_content
 from trpg_agent.tools.dice import parse_expression, roll_dice_once
 from trpg_agent.tools.patches import WorldPatch, apply_world_patches
 
-TURN_GRAPH_VERSION = "turn-graph-v1"
+TURN_GRAPH_VERSION = "turn-graph-v2"
 LOCAL_ADJUDICATION_VERSION = "local-adjudication-v1"
 DETERMINISTIC_TOOL_VERSION = "deterministic-tools-v1"
 AdvisorModelMap = Mapping[AdvisorRole, BaseChatModel]
@@ -135,8 +138,13 @@ def _runtime_metadata(state: GraphState) -> dict[str, Any]:
         },
         "resolver_registry_version": RESOLVER_REGISTRY_VERSION,
         "checkpoint_mode": state.get("checkpoint_mode", "none"),
+        "advisor_contract_mode": _advisor_contract_mode(state),
         "model": state.get("model_metadata", {}),
     }
+
+
+def _advisor_contract_mode(state: Mapping[str, Any]) -> AdvisorContractMode:
+    return "compact" if state.get("advisor_contract_mode") == "compact" else "legacy"
 
 
 def _restore_existing_turn(
@@ -530,7 +538,8 @@ def plan_turn_locally(state: GraphState) -> GraphState:
     authority = AuthorityResult(ok=True, reason="No unsupported authority claim detected.")
     decision = "free_action"
     narration_brief = (
-        "这个行动可以作为当前角色意图成立；我会推进到可见结果，并在出现风险时请求规则扩展。"
+        "Advance the proposed character intent as a free action; show only visible, grounded "
+        "results and request a resolver if risk appears."
     )
     tool_requests: list[ToolRequest] = []
     text = state.get("player_input", "")
@@ -539,10 +548,16 @@ def plan_turn_locally(state: GraphState) -> GraphState:
     if expression:
         decision = "risky_action"
         tool_requests.append(_resolver_tool_request(state, requested_roll=expression))
-        narration_brief = "你请求了一个明确骰式；判定由当前规则扩展和确定性工具产生。"
+        narration_brief = (
+            "The player supplied an explicit dice expression; resolution must come from the "
+            "loaded rules extension and deterministic tools."
+        )
 
     if decision == "gm_move":
-        clock_request = _clock_tick_request(state, "玩家等待或拖延，场景压力推进。")
+        clock_request = _clock_tick_request(
+            state,
+            "The player waits or delays, so scene pressure advances.",
+        )
         if clock_request:
             tool_requests.append(clock_request)
 
@@ -679,10 +694,18 @@ def build_llm_adjudication_node(model: BaseChatModel):
                     "short_circuit": "micro_gates_local_turn_plan",
                 },
             )
-        plan, attempts = invoke_structured_with_repair(
+        contract_mode = _advisor_contract_mode(state)
+        plan_schema = TurnPlan
+        plan_schema_prompt: object = TurnPlan.model_json_schema()
+        plan_model_kwargs = None
+        if contract_mode == "compact":
+            plan_schema = compact_schema_for(TurnPlan)
+            plan_schema_prompt = compact_response_contract(plan_schema)
+            plan_model_kwargs = {"max_tokens": 650}
+        raw_plan, attempts = invoke_structured_with_repair(
             model=model,
             prompt=CORE_GM_PROMPT,
-            schema=TurnPlan,
+            schema=plan_schema,
             payload={
                 "player_input": state.get("player_input", ""),
                 "context": {
@@ -699,10 +722,24 @@ def build_llm_adjudication_node(model: BaseChatModel):
                     "routing_decision": state.get("routing_decision", {}),
                     "rules_advice": state.get("rules_advice", {}),
                     "available_tools": _tool_context(),
-                    "required_schema": TurnPlan.model_json_schema(),
+                    "required_schema": plan_schema_prompt,
                 },
             },
+            model_kwargs=plan_model_kwargs,
         )
+        plan = TurnPlan.model_validate(
+            (
+                adapt_compact_output(
+                    role="core_gm",
+                    output=raw_plan,
+                    player_input=state.get("player_input", ""),
+                    context={"routing_decision": state.get("routing_decision", {})},
+                )
+                if contract_mode == "compact"
+                else raw_plan
+            ).model_dump()
+        )
+        plan = _sanitize_turn_plan_internal_text(state, plan)
         next_state = {
             **state,
             "intent": plan.intent.model_dump(),
@@ -770,26 +807,10 @@ def _micro_gate_turn_plan(state: GraphState) -> TurnPlan:
 
 
 def _micro_gate_narration_brief(state: GraphState, decision: str) -> str:
-    player_input = state.get("player_input", "")
-    if _prefers_chinese(player_input):
-        briefs = {
-            "answer": "回答时只使用已建立事实、玩家可见记忆和可公开规则上下文。",
-            "free_action": (
-                "这个行动可作为当前角色意图推进；叙事应呈现可见结果，"
-                "不制造未授权成功或新耐久事实。"
-            ),
-            "risky_action": (
-                "这个行动有风险且结果未定；必须依据规则解析和工具结果叙事，"
-                "不自行宣布成功或失败。"
-            ),
-            "gm_move": "玩家暂缓或观望；推进一个合乎已建立局势的轻量可见压力，不越过玩家选择。",
-            "boundary": "这个声明不能直接成为既定事实；请把它转成尝试、计划或问题来继续。",
-            "clarify": "先请玩家补充目标、意图或优先级，再推进场景。",
-        }
-        return briefs.get(decision, briefs["free_action"])
     briefs = {
         "answer": (
-            "Answer using only established facts, player-visible memory, and public rules context."
+            "Answer using only established facts, player-visible memory, public rules context, "
+            "and any requested player-visible scenario context."
         ),
         "free_action": (
             "Advance the proposed intent as a free action; show visible results without creating "
@@ -810,6 +831,14 @@ def _micro_gate_narration_brief(state: GraphState, decision: str) -> str:
         "clarify": "Ask the player for the missing target, intent, or priority before advancing.",
     }
     return briefs.get(decision, briefs["free_action"])
+
+
+def _sanitize_turn_plan_internal_text(state: GraphState, plan: TurnPlan) -> TurnPlan:
+    if not _prefers_chinese(plan.narration_brief):
+        return plan
+    return plan.model_copy(
+        update={"narration_brief": _micro_gate_narration_brief(state, plan.decision)}
+    )
 
 
 def _rules_advice_requires_player_clarification(state: GraphState) -> bool:
@@ -909,6 +938,7 @@ def build_llm_intent_arbiter_node(model: BaseChatModel):
                 },
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
+                contract_mode=_advisor_contract_mode(state),
             )
             routing = result.output.model_dump()
             trace_payload = {
@@ -1041,6 +1071,7 @@ def _run_micro_gate(
             context=_micro_gate_context(state, role),
             sqlite_path=state.get("sqlite_path"),
             turn_id=state.get("turn_id"),
+            contract_mode=_advisor_contract_mode(state),
         )
         return result.output.model_dump(), {
             "advisor": result.trace_metadata,
@@ -1157,7 +1188,7 @@ def _routing_from_micro_gates(
         allow_direct_answer = True
         needs_scenario_director = False
         uncertainty = authority.reason
-    elif authority.needs_clarification or target.needs_clarification or target.ambiguous:
+    elif authority.needs_clarification or target.needs_clarification:
         route = "clarify"
         intent_kind = "clarify_needed"
         allow_direct_answer = True
@@ -1172,7 +1203,9 @@ def _routing_from_micro_gates(
         route = "risky_action"
         intent_kind = "action"
         needs_scenario_director = True
-    elif route in {"answer", "rules_query", "memory_recall"}:
+    elif route == "answer":
+        allow_direct_answer = True
+    elif route in {"rules_query", "memory_recall"}:
         allow_direct_answer = True
         needs_scenario_director = False
     elif route in {"boundary", "clarify"}:
@@ -1197,7 +1230,7 @@ def _routing_from_micro_gates(
         route=route,  # type: ignore[arg-type]
         needs_rules_resolution=needs_rules_resolution,
         needs_scenario_director=needs_scenario_director
-        and route in {"free_action", "risky_action", "gm_move"},
+        and route in {"answer", "free_action", "risky_action", "gm_move"},
         needs_memory_recall=needs_memory_recall,
         allow_direct_answer=allow_direct_answer,
         reasoning_summary="Parallel micro-gates produced a bounded routing decision.",
@@ -1416,7 +1449,7 @@ def _clarification_turn_plan(state: GraphState) -> TurnPlan:
         ),
         decision="clarify",
         tool_requests=[],
-        narration_brief=_target_clarification_text(state),
+        narration_brief=_target_clarification_brief(state),
         citations=[],
     )
 
@@ -1435,7 +1468,7 @@ def _rules_clarification_turn_plan(state: GraphState) -> TurnPlan:
         ),
         decision="clarify",
         tool_requests=[],
-        narration_brief=_rules_clarification_text(state),
+        narration_brief=_rules_clarification_brief(state),
         citations=[],
     )
 
@@ -1516,28 +1549,11 @@ def _pending_rule_opportunity_answer_text(
     effect: str,
     grants_prepared: bool,
 ) -> str:
-    player_input = state.get("player_input", "")
-    if _prefers_chinese(player_input):
-        pieces = [
-            "回答这个规则机会的问题；只依据当前已揭示局势、可见场景、最近行动和已公开线索作答。",
-            "不要引入新的成功、失败、伤害、结构变化或未授权事实。",
-        ]
-        if prompt:
-            pieces.append(f"机会说明：{prompt}")
-        if effect:
-            pieces.append(f"机会效果：{effect}")
-        if grants_prepared:
-            pieces.append("回答后说明：如果玩家下一步行动利用了这个答案，该行动会被视为准备充分。")
-        return " ".join(pieces)
     pieces = [
         "Answer the pending rules-granted question using only visible scene context, "
         "recent action, and established facts.",
         "Do not introduce new success, failure, damage, structural changes, or unauthorized facts.",
     ]
-    if prompt:
-        pieces.append(f"Opportunity prompt: {prompt}")
-    if effect:
-        pieces.append(f"Opportunity effect: {effect}")
     if grants_prepared:
         pieces.append(
             "After answering, state that the next relevant action is treated as prepared "
@@ -1552,22 +1568,17 @@ def _pending_rule_opportunity_clarification_text(
     prompt: str,
     effect: str,
 ) -> str:
-    player_input = state.get("player_input", "")
-    if _prefers_chinese(player_input):
-        base = "在继续进行新的风险判定前，你还有一个待使用的规则机会。"
-        prompt_text = f" {prompt}" if prompt else " 你可以向GM问一个关于当前局势的问题。"
-        effect_text = f" {effect}" if effect else ""
-        return f"{base}{prompt_text}{effect_text} 你要现在使用它，还是明确放弃后继续？"
     base = "Before another risky resolution, you still have a pending rules-granted opportunity."
-    prompt_text = (
-        f" {prompt}"
-        if prompt
-        else " You may ask the GM one question about the current situation."
-    )
-    effect_text = f" {effect}" if effect else ""
     return (
-        f"{base}{prompt_text}{effect_text} Do you use it now, "
-        "or explicitly waive it and continue?"
+        f"{base} Ask the player whether they use it now or explicitly waive it and continue."
+    )
+
+
+def _target_clarification_brief(state: GraphState) -> str:
+    return (
+        "The player's input needs a clearer priority, first target, or first step. Ask the "
+        "player to name the specific person, system, object, location, or first step before "
+        "advancing play."
     )
 
 
@@ -1590,16 +1601,38 @@ def _target_clarification_text(state: GraphState) -> str:
     )
 
 
+def _rules_clarification_brief(state: GraphState) -> str:
+    question = str(state.get("rules_advice", {}).get("clarification_question") or "").strip()
+    if not question or re.search(r"[\u4e00-\u9fff]", question):
+        return _target_clarification_brief(state)
+    return (
+        "A consequential fictional choice changes how the action should be resolved. "
+        f"Clarification needed: {question} Ask for the main fictional approach before "
+        "continuing."
+    )
+
+
 def _rules_clarification_text(state: GraphState) -> str:
     player_input = state.get("player_input", "")
     question = str(state.get("rules_advice", {}).get("clarification_question") or "").strip()
     if not question:
         return _target_clarification_text(state)
     if _prefers_chinese(player_input):
+        if not _prefers_chinese(question):
+            return (
+                "这个动作的重点会影响接下来怎么裁定。"
+                "请先说明你最主要的做法、目标或优先顺序，我再沿这个做法继续。"
+            )
         return (
             "这个动作的重点会影响接下来怎么裁定。"
             f"{question}"
             "请先选定主要做法，我再沿这个做法继续。"
+        )
+    if _prefers_chinese(question):
+        return (
+            "The focus of this action changes how it should be resolved. "
+            "Choose the main fictional approach, target, or priority first and I will continue "
+            "from there."
         )
     return (
         "The focus of this action changes how it should be resolved. "
@@ -1707,6 +1740,7 @@ def build_llm_rules_adjudicator_node(model: BaseChatModel):
                 },
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
+                contract_mode=_advisor_contract_mode(state),
             )
             advice = result.output.model_dump()
             trace_payload = {
@@ -1807,6 +1841,7 @@ def build_llm_single_turn_advisor_node(model: BaseChatModel):
                 },
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
+                contract_mode=_advisor_contract_mode(state),
             )
             advice = SingleTurnAdvisorDecision.model_validate(result.output.model_dump())
             advisor_trace = result.trace_metadata
@@ -1948,7 +1983,7 @@ def _harden_single_turn_plan(
         return _single_turn_clarification_turn_plan(state, rules_advice)
     if routing.needs_rules_resolution or rules_advice.requires_resolution:
         plan = plan.model_copy(update={"decision": "risky_action"})
-    return plan
+    return _sanitize_turn_plan_internal_text(state, plan)
 
 
 def _single_turn_clarification_turn_plan(
@@ -1956,16 +1991,10 @@ def _single_turn_clarification_turn_plan(
     rules_advice: RulesAdjudicationAdvice,
 ) -> TurnPlan:
     question = str(rules_advice.clarification_question or "").strip()
-    if _prefers_chinese(state.get("player_input", "")):
-        if not question or not re.search(r"[\u4e00-\u9fff]", question):
-            question = (
-                "这个行动的目标还不够明确。请说明你要靠近、检查或处理的具体地点、"
-                "位置或对象，我再继续主持。"
-            )
-    elif not question:
+    if not question or re.search(r"[\u4e00-\u9fff]", question):
         question = (
-            "The target is not clear yet. Please name the specific place, position, "
-            "or object you want to approach, inspect, or handle."
+            "The target or fictional approach is not clear yet. Ask the player to name the "
+            "specific place, position, object, or method before advancing play."
         )
     return TurnPlan(
         intent=IntentClassification(
@@ -1987,7 +2016,7 @@ def _single_turn_clarification_turn_plan(
 def build_llm_narration_node(model: BaseChatModel):
     def narrate_with_llm(state: GraphState) -> GraphState:
         if state.get("turn_plan", {}).get("decision") == "clarify":
-            final_text = str(state.get("turn_plan", {}).get("narration_brief", "")).strip()
+            final_text = _clarification_player_text(state)
             next_state = {
                 **state,
                 "narration_plan": {
@@ -2003,11 +2032,7 @@ def build_llm_narration_node(model: BaseChatModel):
                 {"final_output": final_text, "short_circuit": "clarification"},
             )
         if _has_failed_required_resolution(state):
-            final_text = (
-                "你把行动推进到关键一刻，局势悬在那里，结果还没落定。"
-                "我不会替这个有风险的行动宣布成功或失败；请补充角色资料、"
-                "明确做法，或重新发起这个行动，我会从这一刻继续裁定。"
-            )
+            final_text = _failed_required_resolution_text(state)
             return _append_trace(
                 {
                     **state,
@@ -2026,13 +2051,21 @@ def build_llm_narration_node(model: BaseChatModel):
             )
 
         try:
-            narration, attempts = invoke_structured_with_repair(
+            contract_mode = _advisor_contract_mode(state)
+            narration_schema = NarrationPlan
+            narration_schema_prompt: object = NarrationPlan.model_json_schema()
+            narration_model_kwargs = None
+            if contract_mode == "compact":
+                narration_schema = compact_schema_for(NarrationPlan)
+                narration_schema_prompt = compact_response_contract(narration_schema)
+                narration_model_kwargs = {"max_tokens": 1100}
+            raw_narration, attempts = invoke_structured_with_repair(
                 model=model,
                 prompt=NARRATION_PROMPT,
-                schema=NarrationPlan,
+                schema=narration_schema,
                 payload={
                     "player_input": state.get("player_input", ""),
-                    "schema": NarrationPlan.model_json_schema(),
+                    "schema": narration_schema_prompt,
                     "context": {
                         "ruleset_id": state.get("ruleset_id"),
                         "scenario_id": state.get("scenario_id"),
@@ -2046,6 +2079,19 @@ def build_llm_narration_node(model: BaseChatModel):
                         "tool_results": state.get("tool_results", []),
                     },
                 },
+                model_kwargs=narration_model_kwargs,
+            )
+            narration = NarrationPlan.model_validate(
+                (
+                    adapt_compact_output(
+                        role="narration",
+                        output=raw_narration,
+                        player_input=state.get("player_input", ""),
+                        context={},
+                    )
+                    if contract_mode == "compact"
+                    else raw_narration
+                ).model_dump()
             )
         except Exception as error:
             final_text = _fallback_narration_text(state)
@@ -2144,18 +2190,114 @@ def _fallback_narration_text(state: GraphState) -> str:
         pieces.append("What do you do next?")
         return " ".join(piece for piece in pieces if piece).strip()
 
-    if decision in {"clarify", "boundary"} and brief:
-        return brief
+    if decision == "clarify":
+        return _clarification_player_text(state)
+    if decision == "boundary":
+        return _boundary_fallback_text(state, brief)
     if decision == "gm_move" and scenario_context:
         return scenario_context
     context = _local_output_context(state, decision).strip()
-    if brief and context:
-        return f"{brief} {context}".strip()
-    return brief or context or (
+    player_brief = _player_facing_brief_or_default(state, decision, brief)
+    if player_brief and context:
+        return f"{player_brief} {context}".strip()
+    return player_brief or context or (
         "你先确认当前可见局势，再决定下一步怎么做。"
         if prefers_chinese
         else "You take in the visible situation before choosing your next move."
     )
+
+
+def _failed_required_resolution_text(state: GraphState) -> str:
+    if _prefers_chinese(state.get("player_input", "")):
+        return (
+            "你把行动推进到关键一刻，局势悬在那里，结果还没落定。"
+            "我不会替这个有风险的行动宣布成功或失败；请补充角色资料、"
+            "明确做法，或重新发起这个行动，我会从这一刻继续裁定。"
+        )
+    return (
+        "Your action reaches the decisive moment, but the outcome is not resolved yet. "
+        "I will not declare success or failure for a risky action without the rules result; "
+        "add the missing character details, clarify the approach, or restate the action and I "
+        "will adjudicate from that moment."
+    )
+
+
+def _player_facing_brief_or_default(
+    state: GraphState,
+    decision: str,
+    brief: str,
+) -> str:
+    prefers_chinese = _prefers_chinese(state.get("player_input", ""))
+    if not prefers_chinese:
+        return brief
+    if brief and _prefers_chinese(brief):
+        return brief
+    defaults = {
+        "answer": "我只依据已经建立且对玩家可见的信息回答。",
+        "free_action": "这个行动可以作为当前角色意图推进；我只呈现可见结果。",
+        "risky_action": "这个行动有风险，结果会依据规则工具和已授权结果呈现。",
+        "gm_move": "你暂缓行动观察局势，场景压力继续推进。",
+    }
+    return defaults.get(decision, "")
+
+
+def _boundary_fallback_text(state: GraphState, brief: str) -> str:
+    prefers_chinese = _prefers_chinese(state.get("player_input", ""))
+    if brief and _prefers_chinese(brief) == prefers_chinese:
+        return brief
+    if prefers_chinese:
+        return (
+            "这个声明还不能直接成为既定事实。请把它描述成尝试、计划或问题，"
+            "或先调查已经可见的信息，我会继续主持。"
+        )
+    return (
+        "That declaration cannot become established fact directly. Frame it as an attempt, "
+        "plan, or question, or investigate what is visibly established, and I will continue."
+    )
+
+
+def _clarification_player_text(state: GraphState) -> str:
+    if _pending_rule_opportunities(state):
+        return _pending_rule_opportunity_player_text(state)
+    if _rules_advice_requires_player_clarification(state):
+        return _rules_clarification_text(state)
+    return _target_clarification_text(state)
+
+
+def _pending_rule_opportunity_player_text(state: GraphState) -> str:
+    opportunity = _pending_rule_opportunities(state)[0]
+    prompt = _same_language_content(
+        state,
+        str(opportunity.get("prompt") or "").strip(),
+    )
+    effect = _same_language_content(
+        state,
+        str(opportunity.get("effect") or "").strip(),
+    )
+    if _prefers_chinese(state.get("player_input", "")):
+        base = "在继续进行新的风险判定前，你还有一个待使用的规则机会。"
+        prompt_text = f" {prompt}" if prompt else " 你可以向 GM 问一个关于当前局势的问题。"
+        effect_text = f" {effect}" if effect else ""
+        return f"{base}{prompt_text}{effect_text} 你要现在使用它，还是明确放弃后继续？"
+    base = "Before another risky resolution, you still have a pending rules-granted opportunity."
+    prompt_text = (
+        f" {prompt}"
+        if prompt
+        else " You may ask the GM one question about the current situation."
+    )
+    effect_text = f" {effect}" if effect else ""
+    return (
+        f"{base}{prompt_text}{effect_text} Do you use it now, "
+        "or explicitly waive it and continue?"
+    )
+
+
+def _same_language_content(state: GraphState, text: str) -> str:
+    if not text:
+        return ""
+    if _prefers_chinese(text) == _prefers_chinese(state.get("player_input", "")):
+        return text
+    return ""
 
 
 def _fallback_visible_scenario_context(state: GraphState) -> str:
@@ -2359,6 +2501,7 @@ def build_llm_critic_guardrail_node(model: BaseChatModel):
                 },
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
+                contract_mode=_advisor_contract_mode(state),
             )
             report = CriticReport.model_validate(result.output.model_dump())
             advisor_trace = result.trace_metadata
@@ -2745,6 +2888,7 @@ def build_llm_memory_curator_node(model: BaseChatModel):
                 },
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
+                contract_mode=_advisor_contract_mode(state),
             )
             curation = MemoryCurationDecision.model_validate(result.output.model_dump())
             advisor_trace = result.trace_metadata
@@ -3068,7 +3212,7 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
     ):
         next_plan["decision"] = "risky_action"
         next_plan["narration_brief"] = (
-            "这个行动有风险且结果不确定；已转交当前规则扩展裁判。"
+            "This action is risky and uncertain; the loaded rules extension must adjudicate it."
         )
 
     return _append_trace(
@@ -3123,14 +3267,17 @@ def _scenario_director_needed(state: GraphState) -> bool:
         return False
     if _has_failed_required_resolution(state):
         return False
-    if state.get("turn_plan", {}).get("decision") in {"clarify", "answer", "boundary"}:
+    decision = state.get("turn_plan", {}).get("decision")
+    if decision in {"clarify", "boundary"}:
         return False
     routing = state.get("routing_decision", {})
     if routing:
         if routing.get("route") == "clarify":
             return False
+        if decision == "answer":
+            return bool(routing.get("needs_scenario_director", False))
         return bool(routing.get("needs_scenario_director", True))
-    return state.get("turn_plan", {}).get("decision") in {
+    return decision in {
         "free_action",
         "risky_action",
         "gm_move",
@@ -3194,6 +3341,7 @@ def build_llm_scenario_director_node(model: BaseChatModel):
                     },
                     sqlite_path=state.get("sqlite_path"),
                     turn_id=state.get("turn_id"),
+                    contract_mode=_advisor_contract_mode(state),
                 )
                 decision = ScenarioDirectorDecision.model_validate(result.output.model_dump())
                 advisor_trace = result.trace_metadata
@@ -3488,25 +3636,39 @@ def emit_turn_output(state: GraphState) -> GraphState:
     decision = plan.get("decision", "clarify")
     brief = plan.get("narration_brief", "")
     tool_lines: list[str] = []
+    prefers_chinese = _prefers_chinese(state.get("player_input", ""))
     for result in state.get("tool_results", []):
         if result.get("tool_name") == "roll_dice" and result.get("ok"):
             payload = result.get("result") or {}
-            tool_lines.append(
-                "骰点结果："
-                f"{payload.get('expression')} -> {payload.get('rolls')}，"
-                f"总计 {payload.get('total')}。"
-            )
+            if prefers_chinese:
+                tool_lines.append(
+                    "骰点结果："
+                    f"{payload.get('expression')} -> {payload.get('rolls')}，"
+                    f"总计 {payload.get('total')}。"
+                )
+            else:
+                tool_lines.append(
+                    f"Roll: {payload.get('expression')} -> {payload.get('rolls')}, "
+                    f"total {payload.get('total')}."
+                )
         if result.get("tool_name") == "run_ruleset_resolver" and result.get("ok"):
             payload = result.get("result") or {}
             dice = payload.get("dice_result") or {}
-            tool_lines.append(
-                "判定结果："
-                f"{dice.get('expression')} -> {dice.get('rolls')}，"
-                f"成功数 {payload.get('successes')}，档位 {payload.get('band_label')}。"
-            )
+            if prefers_chinese:
+                tool_lines.append(
+                    "判定结果："
+                    f"{dice.get('expression')} -> {dice.get('rolls')}，"
+                    f"成功数 {payload.get('successes')}，档位 {payload.get('band_label')}。"
+                )
+            else:
+                tool_lines.append(
+                    f"Resolution: {dice.get('expression')} -> {dice.get('rolls')}; "
+                    f"successes {payload.get('successes')}, band {payload.get('band_label')}."
+                )
     suffix = (" " + " ".join(tool_lines)) if tool_lines else ""
     context = _local_output_context(state, decision)
-    final_output = f"[turn_plan:{decision}] {brief}{context}{suffix}".strip()
+    player_brief = _player_facing_brief_or_default(state, str(decision), str(brief))
+    final_output = f"[turn_plan:{decision}] {player_brief}{context}{suffix}".strip()
     return _append_trace(
         {**state, "final_output": final_output},
         "emit_turn_output",
@@ -3519,16 +3681,26 @@ def _local_output_context(state: GraphState, decision: str) -> str:
         return ""
     pieces: list[str] = []
     player_input = state.get("player_input", "").strip()
+    prefers_chinese = _prefers_chinese(player_input)
     if decision == "free_action" and player_input:
-        pieces.append(f"行动焦点：{player_input[:80]}。")
+        if prefers_chinese:
+            pieces.append(f"行动焦点：{player_input[:80]}。")
+        else:
+            pieces.append(f"Action focus: {player_input[:80]}.")
     world = state.get("world_projection", {})
     scene = world.get("scene")
     if isinstance(scene, dict) and scene.get("public_summary"):
         summary = str(scene["public_summary"]).strip()
-        pieces.append(f"可见局势：{summary[:140]}。")
+        if prefers_chinese:
+            pieces.append(f"可见局势：{summary[:140]}。")
+        else:
+            pieces.append(f"Visible situation: {summary[:140]}.")
     clock = world.get("clock")
     if isinstance(clock, dict) and "value" in clock and "max" in clock:
-        pieces.append(f"当前压力：{clock.get('value')}/{clock.get('max')}。")
+        if prefers_chinese:
+            pieces.append(f"当前压力：{clock.get('value')}/{clock.get('max')}。")
+        else:
+            pieces.append(f"Current pressure: {clock.get('value')}/{clock.get('max')}.")
     return (" " + " ".join(pieces)) if pieces else ""
 
 

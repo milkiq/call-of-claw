@@ -51,6 +51,9 @@ from trpg_agent.langchain.structured import (
     ScenarioDirectorDecision,
     SingleTurnAdvisorDecision,
     TargetMicroGateDecision,
+    adapt_compact_output,
+    compact_response_contract,
+    compact_schema_for,
     invoke_structured_with_repair,
 )
 from trpg_agent.memory.store import SqliteStore
@@ -70,6 +73,7 @@ AdvisorRole = Literal[
     "memory_curator",
     "critic_guardrail",
 ]
+AdvisorContractMode = Literal["legacy", "compact"]
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,7 @@ class AdvisorSpec:
     schema: type[BaseModel]
     prompt_version: str
     max_tokens: int | None = None
+    compact_max_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,7 @@ class AdvisorResult:
     run_id: str
     output: BaseModel
     attempts: list[dict[str, str]]
+    contract_mode: AdvisorContractMode = "legacy"
     cached: bool = False
     metrics: dict[str, str] = field(default_factory=dict)
 
@@ -98,6 +104,7 @@ class AdvisorResult:
             "prompt_version": self.prompt_version,
             "advisor_run_id": self.run_id,
             "schema": self.output.__class__.__name__,
+            "contract_mode": self.contract_mode,
             "cached": str(self.cached).lower(),
         } | self.metrics
 
@@ -108,6 +115,7 @@ ADVISOR_SPECS: dict[AdvisorRole, AdvisorSpec] = {
         prompt=INTENT_ARBITER_PROMPT,
         schema=IntentRoutingDecision,
         prompt_version=INTENT_ARBITER_PROMPT_VERSION,
+        compact_max_tokens=500,
     ),
     "authority_gate": AdvisorSpec(
         role="authority_gate",
@@ -121,6 +129,7 @@ ADVISOR_SPECS: dict[AdvisorRole, AdvisorSpec] = {
         schema=AuthorityMicroGateDecision,
         prompt_version=AUTHORITY_MICRO_GATE_PROMPT_VERSION,
         max_tokens=350,
+        compact_max_tokens=160,
     ),
     "intent_micro_gate": AdvisorSpec(
         role="intent_micro_gate",
@@ -128,6 +137,7 @@ ADVISOR_SPECS: dict[AdvisorRole, AdvisorSpec] = {
         schema=IntentMicroGateDecision,
         prompt_version=INTENT_MICRO_GATE_PROMPT_VERSION,
         max_tokens=300,
+        compact_max_tokens=180,
     ),
     "risk_micro_gate": AdvisorSpec(
         role="risk_micro_gate",
@@ -135,6 +145,7 @@ ADVISOR_SPECS: dict[AdvisorRole, AdvisorSpec] = {
         schema=RiskMicroGateDecision,
         prompt_version=RISK_MICRO_GATE_PROMPT_VERSION,
         max_tokens=350,
+        compact_max_tokens=160,
     ),
     "target_micro_gate": AdvisorSpec(
         role="target_micro_gate",
@@ -142,6 +153,7 @@ ADVISOR_SPECS: dict[AdvisorRole, AdvisorSpec] = {
         schema=TargetMicroGateDecision,
         prompt_version=TARGET_MICRO_GATE_PROMPT_VERSION,
         max_tokens=350,
+        compact_max_tokens=180,
     ),
     "memory_recall_micro_gate": AdvisorSpec(
         role="memory_recall_micro_gate",
@@ -149,36 +161,42 @@ ADVISOR_SPECS: dict[AdvisorRole, AdvisorSpec] = {
         schema=MemoryRecallMicroGateDecision,
         prompt_version=MEMORY_RECALL_MICRO_GATE_PROMPT_VERSION,
         max_tokens=250,
+        compact_max_tokens=120,
     ),
     "rules_adjudicator": AdvisorSpec(
         role="rules_adjudicator",
         prompt=RULES_ADJUDICATOR_PROMPT,
         schema=RulesAdjudicationAdvice,
         prompt_version=RULES_ADJUDICATOR_PROMPT_VERSION,
+        compact_max_tokens=450,
     ),
     "scenario_director": AdvisorSpec(
         role="scenario_director",
         prompt=SCENARIO_DIRECTOR_PROMPT,
         schema=ScenarioDirectorDecision,
         prompt_version=SCENARIO_DIRECTOR_PROMPT_VERSION,
+        compact_max_tokens=650,
     ),
     "single_turn_advisor": AdvisorSpec(
         role="single_turn_advisor",
         prompt=SINGLE_TURN_ADVISOR_PROMPT,
         schema=SingleTurnAdvisorDecision,
         prompt_version=SINGLE_TURN_ADVISOR_PROMPT_VERSION,
+        compact_max_tokens=900,
     ),
     "memory_curator": AdvisorSpec(
         role="memory_curator",
         prompt=MEMORY_CURATOR_PROMPT,
         schema=MemoryCurationDecision,
         prompt_version=MEMORY_CURATOR_PROMPT_VERSION,
+        compact_max_tokens=550,
     ),
     "critic_guardrail": AdvisorSpec(
         role="critic_guardrail",
         prompt=CRITIC_GUARDRAIL_PROMPT,
         schema=CriticReport,
         prompt_version=CRITIC_GUARDRAIL_PROMPT_VERSION,
+        compact_max_tokens=650,
     ),
 }
 
@@ -191,12 +209,14 @@ def advisor_input_hash(
     *,
     role: AdvisorRole,
     prompt_version: str,
+    contract_mode: AdvisorContractMode = "legacy",
     player_input: str,
     context: Mapping[str, object],
 ) -> str:
     payload = {
         "role": role,
         "prompt_version": prompt_version,
+        "contract_mode": contract_mode,
         "player_input": player_input,
         "context": context,
     }
@@ -222,11 +242,21 @@ def invoke_advisor(
     context: Mapping[str, object],
     sqlite_path: str | None = None,
     turn_id: str | None = None,
+    contract_mode: AdvisorContractMode = "legacy",
 ) -> AdvisorResult:
     spec = advisor_spec(role)
+    parse_schema = spec.schema
+    schema_prompt_payload: object = spec.schema.model_json_schema()
+    model_kwargs = {"max_tokens": spec.max_tokens} if spec.max_tokens else None
+    if contract_mode == "compact":
+        parse_schema = compact_schema_for(spec.schema)
+        schema_prompt_payload = compact_response_contract(parse_schema)
+        if spec.compact_max_tokens:
+            model_kwargs = {"max_tokens": spec.compact_max_tokens}
     input_hash = advisor_input_hash(
         role=role,
         prompt_version=spec.prompt_version,
+        contract_mode=contract_mode,
         player_input=player_input,
         context=context,
     )
@@ -248,6 +278,7 @@ def invoke_advisor(
                 run_id=run_id,
                 output=spec.schema.model_validate(cached["output"]),
                 attempts=[{"phase": "cache"}],
+                contract_mode=contract_mode,
                 cached=True,
                 metrics=cached_metrics,
             )
@@ -256,20 +287,28 @@ def invoke_advisor(
     output, attempts = invoke_structured_with_repair(
         model=model,
         prompt=spec.prompt,
-        schema=spec.schema,
+        schema=parse_schema,
         payload={
             "player_input": player_input,
             "context": dict(context),
-            "schema": spec.schema.model_json_schema(),
+            "schema": schema_prompt_payload,
         },
-        model_kwargs={"max_tokens": spec.max_tokens} if spec.max_tokens else None,
+        model_kwargs=model_kwargs,
     )
+    if contract_mode == "compact":
+        output = adapt_compact_output(
+            role=role,
+            output=output,
+            player_input=player_input,
+            context=context,
+        )
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     metrics = _advisor_metrics(
         elapsed_ms=elapsed_ms,
         player_input=player_input,
         context=context,
         attempts=attempts,
+        schema_prompt=schema_prompt_payload,
     )
     attempts_for_store = [
         *attempts,
@@ -293,6 +332,7 @@ def invoke_advisor(
         run_id=run_id,
         output=output,
         attempts=attempts_for_store,
+        contract_mode=contract_mode,
         metrics=metrics,
     )
 
@@ -303,8 +343,13 @@ def _advisor_metrics(
     player_input: str,
     context: Mapping[str, object],
     attempts: list[dict[str, str]],
+    schema_prompt: object,
 ) -> dict[str, str]:
-    prompt_chars = len(player_input) + len(json.dumps(context, ensure_ascii=False, default=str))
+    prompt_chars = (
+        len(player_input)
+        + len(json.dumps(context, ensure_ascii=False, default=str))
+        + len(json.dumps(schema_prompt, ensure_ascii=False, default=str))
+    )
     response_chars = sum(len(str(attempt.get("raw_output", ""))) for attempt in attempts)
     return {
         "elapsed_ms": str(elapsed_ms),

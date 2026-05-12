@@ -96,6 +96,28 @@ def test_online_repetition_gate_ignores_tiny_smoke_runs() -> None:
     assert _online_findings_from_metrics(metrics) == []
 
 
+def test_online_findings_flag_first_turn_clarification() -> None:
+    metrics = SimpleNamespace(
+        requested_turns=2,
+        persisted_turns=2,
+        replay_restored=True,
+        resolver_bypass_count=0,
+        consecutive_repeated_outputs=0,
+        max_repeated_output_ratio=0.0,
+        memory_qa_accuracy=1.0,
+        memory_qa_passed=1,
+        memory_qa_checks=1,
+        first_turn_clarification=True,
+        clarification_rate=0.5,
+    )
+
+    findings = _online_findings_from_metrics(metrics)
+
+    assert [finding.case_id for finding in findings] == [
+        "online-playtest-first-turn-clarification"
+    ]
+
+
 def test_online_auto_judge_skips_short_policy_smoke() -> None:
     assert _online_should_run_llm_judge(
         judge_mode="auto",

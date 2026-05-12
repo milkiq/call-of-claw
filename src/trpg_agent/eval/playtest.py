@@ -42,6 +42,9 @@ class PlaytestMetrics(BaseModel):
     resolver_bypass_count: int = 0
     critical_critic_findings: int = 0
     player_agency_violations: int = 0
+    clarification_turns: int = 0
+    clarification_rate: float = 0.0
+    first_turn_clarification: bool = False
     consecutive_repeated_outputs: int = 0
     max_repeated_output_ratio: float = 0.0
     unresolved_hook_count: int = 0
@@ -272,7 +275,9 @@ def collect_playtest_metrics(
     trace_node_coverage: dict[str, int] = {}
     resolver_bypass_count = 0
     player_agency_violations = 0
-    for turn in turns:
+    clarification_turns = 0
+    first_turn_clarification = False
+    for index, turn in enumerate(turns):
         trace = turn.get("trace", {})
         for event in trace.get("trace_events", []):
             node = str(event.get("node", "unknown"))
@@ -281,6 +286,10 @@ def collect_playtest_metrics(
             resolver_bypass_count += 1
         if _looks_like_player_agency_violation(turn.get("output", "")):
             player_agency_violations += 1
+        if _turn_asked_for_clarification(trace):
+            clarification_turns += 1
+            if index == 0:
+                first_turn_clarification = True
     repetition = _repetition_metrics(turns)
     unresolved_hooks = _unresolved_hook_metrics(store, session_id)
     memory_qa = _memory_qa_metrics(
@@ -311,6 +320,9 @@ def collect_playtest_metrics(
         resolver_bypass_count=resolver_bypass_count,
         critical_critic_findings=critical_findings,
         player_agency_violations=player_agency_violations,
+        clarification_turns=clarification_turns,
+        clarification_rate=(clarification_turns / len(turns)) if turns else 0.0,
+        first_turn_clarification=first_turn_clarification,
         consecutive_repeated_outputs=repetition["consecutive_repeated_outputs"],
         max_repeated_output_ratio=repetition["max_repeated_output_ratio"],
         unresolved_hook_count=unresolved_hooks["unresolved_hook_count"],
@@ -340,6 +352,9 @@ def build_session_quality_summary(store: SqliteStore, session_id: str) -> dict[s
         "resolver_bypass_count": metrics.resolver_bypass_count,
         "critical_critic_findings": metrics.critical_critic_findings,
         "player_agency_violations": metrics.player_agency_violations,
+        "clarification_turns": metrics.clarification_turns,
+        "clarification_rate": metrics.clarification_rate,
+        "first_turn_clarification": metrics.first_turn_clarification,
         "consecutive_repeated_outputs": metrics.consecutive_repeated_outputs,
         "max_repeated_output_ratio": metrics.max_repeated_output_ratio,
         "unresolved_hook_count": metrics.unresolved_hook_count,
@@ -525,6 +540,14 @@ def _turn_has_resolver_bypass(trace: dict[str, Any]) -> bool:
         for result in trace.get("tool_results", [])
         if isinstance(result, dict)
     )
+
+
+def _turn_asked_for_clarification(trace: dict[str, Any]) -> bool:
+    plan = trace.get("turn_plan", {})
+    if plan.get("decision") == "clarify":
+        return True
+    routing = trace.get("routing_decision", {})
+    return routing.get("route") == "clarify"
 
 
 def _looks_like_player_agency_violation(output: str) -> bool:

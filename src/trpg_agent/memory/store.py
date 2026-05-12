@@ -250,6 +250,172 @@ class SqliteStore:
             for row in rows
         ]
 
+    def list_session_summaries(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  sessions.id,
+                  sessions.ruleset_id,
+                  sessions.scenario_id,
+                  sessions.created_at,
+                  sessions.updated_at,
+                  COUNT(DISTINCT turns.id) AS turn_count,
+                  COUNT(DISTINCT memories.id) AS memory_count,
+                  CASE WHEN session_state.session_id IS NULL THEN 0 ELSE 1 END AS has_state
+                FROM sessions
+                LEFT JOIN turns ON turns.session_id = sessions.id
+                LEFT JOIN memories ON memories.scope = sessions.id
+                LEFT JOIN session_state ON session_state.session_id = sessions.id
+                GROUP BY sessions.id
+                ORDER BY sessions.updated_at DESC, sessions.id
+                """
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "ruleset_id": row["ruleset_id"],
+                "scenario_id": row["scenario_id"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "turn_count": int(row["turn_count"] or 0),
+                "memory_count": int(row["memory_count"] or 0),
+                "has_state": bool(row["has_state"]),
+            }
+            for row in rows
+        ]
+
+    def delete_sessions(self, session_ids: list[str]) -> dict[str, int]:
+        unique_ids = list(dict.fromkeys(session_id for session_id in session_ids if session_id))
+        if not unique_ids:
+            return self._empty_delete_counts()
+        with self.connect() as conn:
+            return self._delete_sessions_in_conn(conn, unique_ids)
+
+    def delete_all_sessions(self) -> dict[str, int]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT id FROM sessions ORDER BY id").fetchall()
+            session_ids = [str(row["id"]) for row in rows]
+            counts = (
+                self._delete_sessions_in_conn(conn, session_ids)
+                if session_ids
+                else self._empty_delete_counts()
+            )
+            counts["memories_fts"] += self._deleted_count(
+                conn.execute("DELETE FROM memories_fts")
+            )
+            counts["memories"] += self._deleted_count(conn.execute("DELETE FROM memories"))
+            return counts
+
+    @staticmethod
+    def _empty_delete_counts() -> dict[str, int]:
+        return {
+            "sessions": 0,
+            "turns": 0,
+            "canon_events": 0,
+            "session_state": 0,
+            "world_patch_applications": 0,
+            "critic_reports": 0,
+            "advisor_runs": 0,
+            "dice_rolls": 0,
+            "memories": 0,
+            "memories_fts": 0,
+        }
+
+    @staticmethod
+    def _deleted_count(cursor: sqlite3.Cursor) -> int:
+        return max(0, int(cursor.rowcount or 0))
+
+    def _delete_sessions_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        session_ids: list[str],
+    ) -> dict[str, int]:
+        counts = self._empty_delete_counts()
+        for session_id in session_ids:
+            turn_rows = conn.execute(
+                """
+                SELECT id
+                FROM turns
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchall()
+            turn_ids = [str(row["id"]) for row in turn_rows]
+            for turn_id in turn_ids:
+                counts["advisor_runs"] += self._deleted_count(
+                    conn.execute(
+                        "DELETE FROM advisor_runs WHERE turn_id = ?",
+                        (turn_id,),
+                    )
+                )
+                counts["dice_rolls"] += self._deleted_count(
+                    conn.execute(
+                        "DELETE FROM dice_rolls WHERE turn_id = ?",
+                        (turn_id,),
+                    )
+                )
+
+            memory_rows = conn.execute(
+                """
+                SELECT id
+                FROM memories
+                WHERE scope = ?
+                """,
+                (session_id,),
+            ).fetchall()
+            memory_ids = [str(row["id"]) for row in memory_rows]
+            for memory_id in memory_ids:
+                counts["memories_fts"] += self._deleted_count(
+                    conn.execute(
+                        "DELETE FROM memories_fts WHERE id = ?",
+                        (memory_id,),
+                    )
+                )
+            counts["memories"] += self._deleted_count(
+                conn.execute(
+                    "DELETE FROM memories WHERE scope = ?",
+                    (session_id,),
+                )
+            )
+            counts["critic_reports"] += self._deleted_count(
+                conn.execute(
+                    "DELETE FROM critic_reports WHERE session_id = ?",
+                    (session_id,),
+                )
+            )
+            counts["world_patch_applications"] += self._deleted_count(
+                conn.execute(
+                    "DELETE FROM world_patch_applications WHERE session_id = ?",
+                    (session_id,),
+                )
+            )
+            counts["session_state"] += self._deleted_count(
+                conn.execute(
+                    "DELETE FROM session_state WHERE session_id = ?",
+                    (session_id,),
+                )
+            )
+            counts["canon_events"] += self._deleted_count(
+                conn.execute(
+                    "DELETE FROM canon_events WHERE session_id = ?",
+                    (session_id,),
+                )
+            )
+            counts["turns"] += self._deleted_count(
+                conn.execute(
+                    "DELETE FROM turns WHERE session_id = ?",
+                    (session_id,),
+                )
+            )
+            counts["sessions"] += self._deleted_count(
+                conn.execute(
+                    "DELETE FROM sessions WHERE id = ?",
+                    (session_id,),
+                )
+            )
+        return counts
+
     def insert_turn(
         self,
         *,
@@ -388,6 +554,35 @@ class SqliteStore:
         return [
             {
                 "id": row["id"],
+                "role": row["role"],
+                "prompt_version": row["prompt_version"],
+                "input_hash": row["input_hash"],
+                "output": json.loads(row["output_json"]),
+                "attempts": json.loads(row["attempts_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def list_advisor_runs_for_session(self, session_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT advisor_runs.id, advisor_runs.turn_id, advisor_runs.role,
+                       advisor_runs.prompt_version, advisor_runs.input_hash,
+                       advisor_runs.output_json, advisor_runs.attempts_json,
+                       advisor_runs.created_at
+                FROM advisor_runs
+                JOIN turns ON turns.id = advisor_runs.turn_id
+                WHERE turns.session_id = ?
+                ORDER BY advisor_runs.created_at, advisor_runs.id
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "turn_id": row["turn_id"],
                 "role": row["role"],
                 "prompt_version": row["prompt_version"],
                 "input_hash": row["input_hash"],

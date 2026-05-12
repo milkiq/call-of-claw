@@ -21,10 +21,18 @@ Advisor trace metadata includes:
 - `attempt_count`;
 - prompt version;
 - schema name;
+- advisor contract mode;
 - cache status.
 
 These metrics are coarse and provider-independent. They are intended for trend analysis and
 debugging, not billing-grade accounting.
+
+`trpg eval advisor-metrics` summarizes these diagnostics per session and can compare a legacy
+session with a compact-contract session.
+
+Online and long-play reports also include `clarification_turns`, `clarification_rate`, and
+`first_turn_clarification`. These are trace-derived quality signals used to catch regressions where
+safe current-situation observation gets converted into unnecessary clarification.
 
 ## Model Fallback Policy
 

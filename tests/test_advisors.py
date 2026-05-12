@@ -10,13 +10,18 @@ from trpg_agent.langchain.structured import (
     CriticReport,
     IntentMicroGateDecision,
     IntentRoutingDecision,
+    IntentRoutingWire,
     MemoryCurationDecision,
+    MemoryCurationWire,
     MemoryRecallMicroGateDecision,
     RiskMicroGateDecision,
     RulesAdjudicationAdvice,
     ScenarioDirectorDecision,
     SingleTurnAdvisorDecision,
     TargetMicroGateDecision,
+    adapt_compact_output,
+    compact_response_contract,
+    compact_schema_for,
 )
 
 
@@ -207,6 +212,61 @@ def test_advisor_structured_contracts_validate() -> None:
     )
 
 
+def test_compact_contracts_are_shorter_than_full_schemas() -> None:
+    for role, spec in ADVISOR_SPECS.items():
+        compact_schema = compact_schema_for(spec.schema)
+        if compact_schema is spec.schema:
+            continue
+        compact_contract = compact_response_contract(compact_schema)
+        full_schema_text = str(spec.schema.model_json_schema())
+        assert len(compact_contract) < len(full_schema_text), role
+
+
+def test_compact_wire_output_adapts_to_internal_contract() -> None:
+    compact = IntentRoutingWire.model_validate(
+        {
+            "route": "risky_action",
+            "flags": ["rules", "scenario"],
+            "confidence": 0.91,
+            "message": "The action has consequential uncertainty.",
+            "code": "uncertain-risk",
+            "refs": ["rules:core"],
+        }
+    )
+
+    adapted = adapt_compact_output(role="intent_arbiter", output=compact)
+
+    assert isinstance(adapted, IntentRoutingDecision)
+    assert adapted.route == "risky_action"
+    assert adapted.needs_rules_resolution is True
+    assert adapted.needs_scenario_director is True
+    assert adapted.intent.reason == "The action has consequential uncertainty."
+
+
+def test_compact_wire_adapters_normalize_loose_labels() -> None:
+    memory = MemoryCurationWire.model_validate(
+        {
+            "write": True,
+            "canon": None,
+            "mem": [
+                {
+                    "kind": "npc_state",
+                    "text": "The guide is waiting outside.",
+                    "scope": "session",
+                    "conf": 0.8,
+                    "meta": {},
+                }
+            ],
+            "contradictions": [],
+        }
+    )
+
+    adapted = adapt_compact_output(role="memory_curator", output=memory)
+
+    assert isinstance(adapted, MemoryCurationDecision)
+    assert adapted.memory_candidates[0].kind == "character_state"
+
+
 def test_invoke_advisor_parses_structured_output() -> None:
     model = FakeListChatModel(
         responses=[
@@ -236,12 +296,48 @@ def test_invoke_advisor_parses_structured_output() -> None:
     assert isinstance(result.output, IntentRoutingDecision)
     assert result.output.needs_rules_resolution is True
     assert result.trace_metadata["advisor_role"] == "intent_arbiter"
-    assert result.trace_metadata["prompt_version"] == "intent-arbiter-v4"
+    assert result.trace_metadata["prompt_version"] == "intent-arbiter-v6"
     assert result.trace_metadata["schema"] == "IntentRoutingDecision"
     assert result.trace_metadata["cached"] == "false"
     assert int(result.trace_metadata["elapsed_ms"]) >= 0
     assert int(result.trace_metadata["estimated_prompt_chars"]) > 0
     assert int(result.trace_metadata["estimated_response_chars"]) > 0
+
+
+def test_invoke_advisor_parses_compact_output_and_caches_by_contract(tmp_path) -> None:
+    model = FakeListChatModel(
+        responses=[
+            """
+            {
+              "route": "risky_action",
+              "flags": ["rules", "scenario"],
+              "confidence": 0.9,
+              "message": "The action is risky and uncertain.",
+              "code": null,
+              "refs": []
+            }
+            """,
+            "this would fail if compact cache is not used",
+        ]
+    )
+    kwargs = {
+        "model": model,
+        "role": "intent_arbiter",
+        "player_input": "I force the door open.",
+        "context": {"world_projection": {}},
+        "sqlite_path": str(tmp_path / "advisor.sqlite"),
+        "turn_id": "compact-t1",
+        "contract_mode": "compact",
+    }
+
+    first = invoke_advisor(**kwargs)
+    second = invoke_advisor(**kwargs)
+
+    assert isinstance(first.output, IntentRoutingDecision)
+    assert first.output.needs_rules_resolution is True
+    assert first.trace_metadata["contract_mode"] == "compact"
+    assert second.cached is True
+    assert second.output.model_dump() == first.output.model_dump()
 
 
 def test_invoke_advisor_reuses_cached_output(tmp_path) -> None:
