@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 import uuid
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -13,8 +14,9 @@ from langgraph.graph import END, START, StateGraph
 from trpg_agent.content.compiled import load_compiled_ruleset
 from trpg_agent.content.packages import PackageKind
 from trpg_agent.content.registry import ContentRegistry
-from trpg_agent.content.retrieval import search_registry_text
+from trpg_agent.content.retrieval import search_registry_text_indexed
 from trpg_agent.content.visibility import AccessMode
+from trpg_agent.context_budget import build_context_budget_snapshot, compact_context_budget_trace
 from trpg_agent.graph.state import GraphState
 from trpg_agent.langchain.advisors import AdvisorContractMode, AdvisorRole, invoke_advisor
 from trpg_agent.langchain.prompts import (
@@ -168,6 +170,7 @@ def _restore_existing_turn(
             {"node": "replay_persisted_turn", "turn_id": turn_id},
         ],
         "retrieved_spans": trace.get("retrieved_spans", []),
+        "context_budget": trace.get("context_budget", {}),
         "tool_results": trace.get("tool_results", []),
         "player_memory_hits": trace.get("player_memory_hits", []),
         "package_profiles": trace.get("package_profiles", state.get("package_profiles", [])),
@@ -342,16 +345,28 @@ def retrieve_memory(state: GraphState) -> GraphState:
 
 def retrieve_content_spans(state: GraphState) -> GraphState:
     registry = _registry_from_state(state)
-    spans = [
-        span.to_dict()
-        for span in search_registry_text(
+    sqlite_path = state.get("sqlite_path")
+    if sqlite_path:
+        retrieval = search_registry_text_indexed(
+            registry,
+            state.get("player_input", ""),
+            sqlite_path=Path(sqlite_path),
+            package_ids=state.get("active_package_ids", []),
+            mode=AccessMode.GM,
+            limit=6,
+        )
+    else:
+        from trpg_agent.content.retrieval import search_registry_text_with_diagnostics
+
+        retrieval = search_registry_text_with_diagnostics(
             registry,
             state.get("player_input", ""),
             package_ids=state.get("active_package_ids", []),
             mode=AccessMode.GM,
             limit=6,
         )
-    ]
+    spans = [span.to_dict() for span in retrieval.spans]
+    diagnostics = retrieval.diagnostics
     return _append_trace(
         {**state, "retrieved_spans": spans},
         "retrieve_content_spans",
@@ -365,6 +380,7 @@ def retrieve_content_spans(state: GraphState) -> GraphState:
                 }
                 for span in spans
             ],
+            "diagnostics": diagnostics,
         },
     )
 
@@ -377,11 +393,17 @@ def retrieve_context_parallel(state: GraphState) -> GraphState:
     """
 
     branch_state: GraphState = {**state, "trace_events": []}
+    def timed_branch(fn: Any) -> tuple[GraphState, int]:
+        started = time.perf_counter()
+        return fn(branch_state), int((time.perf_counter() - started) * 1000)
+
+    branch_started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="trpg-context") as executor:
-        memory_future = executor.submit(retrieve_memory, branch_state)
-        content_future = executor.submit(retrieve_content_spans, branch_state)
-        memory_state = memory_future.result()
-        content_state = content_future.result()
+        memory_future = executor.submit(timed_branch, retrieve_memory)
+        content_future = executor.submit(timed_branch, retrieve_content_spans)
+        memory_state, memory_elapsed_ms = memory_future.result()
+        content_state, content_elapsed_ms = content_future.result()
+    parallel_elapsed_ms = int((time.perf_counter() - branch_started) * 1000)
 
     trace_events = [
         *state.get("trace_events", []),
@@ -395,14 +417,22 @@ def retrieve_context_parallel(state: GraphState) -> GraphState:
         "retrieved_spans": content_state.get("retrieved_spans", []),
         "trace_events": trace_events,
     }
+    context_budget = build_context_budget_snapshot(next_state)
+    next_state["context_budget"] = context_budget
     return _append_trace(
         next_state,
         "retrieve_context_parallel",
         {
             "branches": ["retrieve_memory", "retrieve_content_spans"],
+            "branch_elapsed_ms": {
+                "retrieve_memory": memory_elapsed_ms,
+                "retrieve_content_spans": content_elapsed_ms,
+                "parallel_total": parallel_elapsed_ms,
+            },
             "memory_hits": len(next_state.get("memory_hits", [])),
             "player_memory_hits": len(next_state.get("player_memory_hits", [])),
             "retrieved_spans": len(next_state.get("retrieved_spans", [])),
+            "context_budget": compact_context_budget_trace(context_budget),
         },
     )
 
@@ -3730,6 +3760,7 @@ def persist_turn(state: GraphState) -> GraphState:
         "recent_canon": state.get("recent_canon", []),
         "memory_hits": state.get("memory_hits", []),
         "player_memory_hits": state.get("player_memory_hits", []),
+        "context_budget": state.get("context_budget", {}),
         "package_profiles": state.get("package_profiles", []),
         "tool_results": state.get("tool_results", []),
         "routing_decision": state.get("routing_decision", {}),

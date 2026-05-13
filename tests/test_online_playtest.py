@@ -5,10 +5,12 @@ from types import SimpleNamespace
 from trpg_agent.eval.online_playtest import (
     _offers_pending_question_opportunity,
     _online_findings_from_metrics,
+    _online_findings_from_runtime,
     _online_should_run_llm_judge,
     _online_smoke_fast_path,
     _policy_player_action,
     _public_state_from_trace,
+    _runtime_summary_from_trace,
     _sample_transcript,
     _transcript_markdown,
 )
@@ -115,6 +117,60 @@ def test_online_findings_flag_first_turn_clarification() -> None:
 
     assert [finding.case_id for finding in findings] == [
         "online-playtest-first-turn-clarification"
+    ]
+
+
+def test_runtime_summary_surfaces_slowest_nodes_and_risks() -> None:
+    summary = _runtime_summary_from_trace(
+        [
+            {
+                "turn": 1,
+                "runtime_profile": {
+                    "budget_profile": "balanced",
+                    "total_elapsed_ms": 120,
+                    "node_count": 3,
+                    "fallback_count": 1,
+                    "timeout_count": 0,
+                    "advisor_timeout_count": 0,
+                    "slowest_nodes": [
+                        {"node": "narrate_with_llm", "elapsed_ms": 70, "sequence": 3}
+                    ],
+                },
+            },
+            {
+                "turn": 2,
+                "runtime_profile": {
+                    "budget_profile": "balanced",
+                    "total_elapsed_ms": 200,
+                    "node_count": 4,
+                    "fallback_count": 0,
+                    "timeout_count": 1,
+                    "advisor_timeout_count": 1,
+                    "slowest_nodes": [
+                        {"node": "intent_arbiter", "elapsed_ms": 110, "sequence": 2}
+                    ],
+                },
+            },
+        ]
+    )
+
+    assert summary["total_elapsed_ms"] == 320
+    assert summary["node_count"] == 7
+    assert summary["fallback_count"] == 1
+    assert summary["timeout_count"] == 1
+    assert summary["advisor_timeout_count"] == 1
+    assert summary["slowest_nodes"][0]["node"] == "intent_arbiter"
+    assert "turn2:intent_arbiter=110ms" in summary["slowest_nodes_text"]
+
+
+def test_online_findings_flag_runtime_timeout_and_fallback() -> None:
+    findings = _online_findings_from_runtime(
+        {"timeout_count": 2, "advisor_timeout_count": 1, "fallback_count": 3}
+    )
+
+    assert [finding.case_id for finding in findings] == [
+        "online-playtest-runtime-timeout",
+        "online-playtest-runtime-fallback",
     ]
 
 

@@ -56,6 +56,9 @@ def _metrics_from_attempts(attempts: list[dict[str, Any]]) -> dict[str, int] | N
     return {
         "elapsed_ms": _int_metric(metrics.get("elapsed_ms")),
         "estimated_prompt_chars": _int_metric(metrics.get("estimated_prompt_chars")),
+        "player_input_chars": _int_metric(metrics.get("player_input_chars")),
+        "context_chars": _int_metric(metrics.get("context_chars")),
+        "schema_chars": _int_metric(metrics.get("schema_chars")),
         "estimated_response_chars": _int_metric(metrics.get("estimated_response_chars")),
         "attempt_count": _int_metric(metrics.get("attempt_count"), default=1),
         "repair_count": 1
@@ -75,6 +78,8 @@ def _summarize_metric_rows(rows: list[dict[str, int]]) -> dict[str, Any]:
             "elapsed_ms_p95": 0,
             "avg_prompt_chars": 0,
             "avg_response_chars": 0,
+            "avg_context_chars": 0,
+            "avg_schema_chars": 0,
             "repair_rate": 0.0,
         }
     return {
@@ -87,6 +92,14 @@ def _summarize_metric_rows(rows: list[dict[str, int]]) -> dict[str, Any]:
         ),
         "avg_response_chars": round(
             sum(row["estimated_response_chars"] for row in rows) / len(rows),
+            1,
+        ),
+        "avg_context_chars": round(
+            sum(row["context_chars"] for row in rows) / len(rows),
+            1,
+        ),
+        "avg_schema_chars": round(
+            sum(row["schema_chars"] for row in rows) / len(rows),
             1,
         ),
         "repair_rate": round(sum(row["repair_count"] for row in rows) / len(rows), 4),

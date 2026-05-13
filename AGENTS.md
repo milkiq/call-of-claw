@@ -3,8 +3,12 @@
 This project is a generic TRPG GM agent runtime. Future development must preserve the boundary
 between the generic GM engine and concrete TRPG rules/scenarios.
 
-Use `docs/gm-agent-architecture-milestones.md` as the staged roadmap for reliability, long-session
-operation, specialist advisor agents, memory, evaluation, and generic play quality.
+Use `docs/gm-agent-architecture-milestones.md` as the staged roadmap. Milestones 0-13 are the
+foundation baseline for reliability, long-session operation, specialist advisor agents, memory,
+evaluation, and generic play quality. New development should prioritize Milestones 14-23: runtime
+profiling, context budgeting, indexed retrieval, conditional advisors, Archivist/Narrator
+separation, style state, prefix cache, rules plugins, structured scenario transitions, semi-open
+long-play evaluation, and user-facing play profiles.
 
 ## Architecture Red Lines
 
@@ -19,6 +23,8 @@ operation, specialist advisor agents, memory, evaluation, and generic play quali
 - Ruleset-specific adjudication belongs in compiled ruleset packages and resolver extensions.
 - Scenario-specific GM requirements, secrets, scenes, clocks, NPCs, clues, and endings belong in
   compiled scenario packages.
+- GM style, table tone, and NPC voice are style state or package data. They must not authorize
+  durable facts, world changes, hidden reveals, rule effects, or player decisions.
 - LLM output is advisory until validated by structured schemas and deterministic tools. Durable
   facts must come from tool results, world patches, or canon events.
 - Risky and uncertain actions must go through the loaded resolver. The graph must not allow LLMs to
@@ -31,6 +37,15 @@ operation, specialist advisor agents, memory, evaluation, and generic play quali
 - Tests and content packages may contain smoke-test terms. `src/trpg_agent` must not.
 - Offline turn eval must use fake advisor/fixture responses rather than relying on core graph
   keyword guessing.
+- Do not solve latency by weakening resolver, visibility, critic, or durable-state boundaries.
+  Optimize through profiling, context budgeting, indexed retrieval, conditional advisors, and
+  provider-friendly stable prefixes first.
+- Before changing context budgets, retrieval, advisor scheduling, or provider settings, inspect
+  `trpg eval observation-report` so optimization work is tied to measured slow nodes, prompt size,
+  fallback counts, and timeout counts.
+- User-facing play configuration should go through `--profile fast|balanced|theatrical` and
+  `--local`; do not re-expose low-level experiment flags on `trpg play` unless they are promoted to
+  documented profile behavior.
 
 ## Required Checks
 

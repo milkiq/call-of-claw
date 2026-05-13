@@ -611,6 +611,367 @@ Acceptance:
 - Runtime failures are diagnosable from traces and persisted eval reports.
 - Prompt, graph, package, and resolver changes are all attributable in quality reports.
 
+## Post-Research Roadmap: Speed, Style, and Scalable Genericity
+
+Deep research in `docs/deep-research-report.md` reframes Milestones 0-13 as the foundation
+baseline. They establish replay safety, advisor boundaries, package-owned rules and scenarios,
+memory, critic guardrails, genericity checks, and a playable CLI. The next development phase should
+not add heavier always-on multi-agent coordination. It should tighten the runtime path around:
+
+- progressive disclosure and explicit context budgets;
+- an Archivist/Narrator split, where the Archivist prepares authorized facts and the Narrator only
+  writes player-facing text;
+- conditional lightweight advisors instead of every advisor running every turn;
+- indexed retrieval and provider-friendly stable prompt prefixes;
+- a style state that improves GM voice without becoming canon or world state;
+- plugin-oriented rules and scenario transitions that keep game-specific behavior out of core code.
+
+Recent test evidence should guide this sequence: required offline checks pass, bounded live eval can
+pass, and a 2-turn online A/B showed `clarification_rate=0` for both legacy and compact contracts.
+However, true online runs still showed high latency and provider read timeouts; compact contracts
+reduced response size but did not reliably reduce wall-clock latency. Therefore the next milestones
+prioritize profiling, context shape, retrieval, and conditional routing before making compact mode
+or micro-gates the default.
+
+## Milestone 14: Runtime Profiling and Latency Budget
+
+Goal: Explain where online play spends time before changing the runtime path.
+
+Current status: baseline implemented. Advisor diagnostics record elapsed time and estimated prompt
+and response size. `invoke_turn_graph()` and `stream_turn_graph()` now attach a `runtime_profile`
+with per-node wall-clock timings, the selected latency budget profile, slowest nodes, and
+trace-derived fallback/timeout counts, and coarse latency categories. Online play reports include
+runtime metadata and flag timeout or fallback markers as infrastructure findings. `trpg eval
+observation-report` can summarize historical report files and stored advisor runs, including older
+reports that predate `runtime_profile`. Remaining work is finer provider-level attribution where a
+backend exposes cache/read/write timings.
+
+Implementation work:
+
+- Add wall-clock timing for every graph node and every parallel branch.
+  - Done for graph nodes and context retrieval branches.
+- Record LLM elapsed time, timeout/fallback status, repair attempts, cache hits, and prompt/response
+  character estimates in one node-latency report.
+  - Done through advisor diagnostics, prompt breakdown metadata, observation reports, and graph-level
+    runtime reports.
+- Split latency categories into retrieval I/O, graph orchestration, provider wait, schema repair,
+  deterministic tools, critic, and memory curation.
+  - Done as coarse runtime node categories; schema repair remains advisor-attempt metadata.
+- Add explicit runtime budgets for `fast`, `balanced`, and `theatrical` profiles.
+  - Done as reporting budgets; CLI play-profile switching is Milestone 23.
+- Ensure online reports surface timeout/fallback counts even when the playtest technically passes.
+  - Done through runtime metadata and infrastructure findings.
+
+Verification:
+
+- Unit tests cover node timing metadata, timeout/fallback marker counting, runtime summary
+  serialization, and online runtime findings.
+- 2-5 turn online smoke with node-latency table and timeout/fallback counts remains a live
+  verification step when model access is available.
+- Regression test proves fallback and timeout events do not disappear from online quality reports.
+
+Acceptance:
+
+- A developer can identify the three slowest nodes in every online playtest report.
+- Online playtest reports distinguish provider latency from graph overhead.
+- Passing online smoke cannot hide advisor timeout/fallback risk.
+
+## Milestone 15: Context Budgeter and Retrieval Index
+
+Goal: Stop sending large undifferentiated context blobs and stop scanning content files every turn.
+
+Current status: partially implemented. Advisor context is clipped by role, memory uses SQLite FTS,
+and content retrieval now has an indexed SQLite backend with scan fallback. A shadow
+`ContextBudgeter` records stable prefix, scene, rules, memory, canon, retrieved public/GM,
+tool-result, and style buckets without changing advisor input yet.
+
+Implementation work:
+
+- Add a `ContextBudgeter` that builds explicit buckets for stable prefix, local scene, local rules,
+  player-visible memory, recent canon, retrieved spans, and style state.
+  - Done in shadow mode.
+- Give each bucket a default token/character budget and a clear clipping priority.
+  - Done as reporting budgets; enforcement remains follow-up.
+- Add a local content index backed by SQLite FTS/BM25 while preserving the current
+  `search_registry_text()` interface.
+  - Done as an indexed runtime path with scan fallback.
+- Store package id, reference id, title, tags, visibility, text, and package version in the index.
+  - Done.
+- Rebuild the index when package version, manifest, or reference mtime changes.
+  - Done for manifest/reference mtime and package version.
+- Mark retrieved spans with bucket, visibility, citation id, and whether they are mandatory or
+  discardable.
+  - Not yet done; this belongs with budget enforcement and Archivist packet construction.
+
+Verification:
+
+- Content retrieval tests cover visibility, GM-only exclusion for player contexts, CJK queries,
+  package filtering, indexed retrieval diagnostics, and scan fallback surface.
+- Prompt-size regression tests currently verify shadow budget measurements; enforcement tests remain
+  a follow-up.
+- Offline eval and content check pass with indexed retrieval enabled.
+
+Acceptance:
+
+- Adding content packages does not force each turn to read every reference file.
+- Narrator prompts are smaller without losing required visible facts or rule citations.
+- Hidden content remains unavailable to player-facing context unless revealed by validated play.
+
+## Milestone 16: Conditional Advisor Runtime
+
+Goal: Run only the advisors that a turn actually needs.
+
+Current status: experimental. Micro-gates and compact contracts exist, but true online tests showed
+provider timeouts and no reliable wall-clock win. The runtime still needs a safer scheduling model.
+
+Implementation work:
+
+- Classify each turn into a generic complexity profile:
+  - safe observation;
+  - direct information answer;
+  - memory recall;
+  - risky action;
+  - scene transition;
+  - boundary or authority risk;
+  - high-risk output review.
+- Build a fast path for safe observation and direct answers: lightweight router, Archivist packet,
+  Narrator, and deterministic lint.
+- Keep full critic mandatory for resolver results, hidden-context exposure, scenario patches,
+  boundary repairs, and any high-risk output.
+- Trigger memory curation on durable events, scene changes, explicit player preference updates, or
+  fixed turn intervals, rather than every low-impact turn.
+- Persist the skip reason for every advisor that does not run.
+
+Verification:
+
+- Fixture tests for each complexity profile and advisor skip reason.
+- Online 2-5 turn A/B comparing advisor call counts, fallback count, clarification rate, and quality
+  score.
+- Regression tests for risky action resolver enforcement under fast path.
+
+Acceptance:
+
+- Safe observation turns use fewer LLM calls than the full path.
+- Resolver bypass, hidden leaks, and unsupported facts remain at zero in regression and live smoke.
+- Trace explains why each advisor ran or was skipped.
+
+## Milestone 17: Archivist/Narrator Split
+
+Goal: Separate fact assembly and disclosure policy from player-facing prose.
+
+Current status: not implemented as a named boundary. Existing nodes already contain the raw
+ingredients: retrieved spans, world projection, turn plan, scenario director state, tool results,
+canon, memory, and narration.
+
+Implementation work:
+
+- Add an `ArchivistTurnPacket` containing only authorized facts for this turn:
+  current visible scene, relevant rules envelope, tool/resolver results, validated scenario
+  context, unresolved hooks, allowed citations, and explicit no-go boundaries.
+- Let the Archivist own progressive disclosure and context budgeting.
+- Let Narrator consume only player input, the Archivist packet, and style state.
+- Prevent Narrator from directly consuming GM-only retrieved spans or full package text.
+- Extend critic checks to verify final text stays inside the Archivist packet.
+
+Verification:
+
+- Unit tests prove hidden retrieved spans cannot reach Narrator context.
+- Fake-model graph tests show Narrator can produce final text from packet-only context.
+- Critic tests catch final text that introduces facts outside the packet.
+
+Acceptance:
+
+- Narrator is a prose layer, not a fact-discovery layer.
+- Unsupported durable facts do not increase after the split.
+- Prompt size and final-text controllability improve against the current path.
+
+## Milestone 18: Style State and Human-Likeness Evaluation
+
+Goal: Improve GM voice without weakening rules, fact, or agency guardrails.
+
+Current status: not implemented. Narration prompts enforce safe and concise output, but there is no
+explicit durable style layer or style judge.
+
+Implementation work:
+
+- Add session-level `style_state` separate from canon, memory, and world state.
+- Include GM tone, narrative distance, question style, dice reveal style, pressure curve, dialogue
+  ratio, allowed sensory palette, and taboo patterns.
+- Add NPC voice state with stance, voice, last emotion, and secrecy boundary, provided by scenario
+  packages or validated state.
+- Add a style judge with dimensions:
+  - `human_likeness`;
+  - `voice_consistency`;
+  - `npc_distinctiveness`.
+- Build a small style comparison dataset before considering SFT or LoRA.
+
+Verification:
+
+- Schema tests for style state and NPC voice state.
+- Judge tests that distinguish mechanical restatement, voice drift, and NPC sameness.
+- Live eval compares existing scorecard with style judge results.
+
+Acceptance:
+
+- Narration feels less templated while player agency, hidden-leak, and unsupported-fact scores do
+  not regress.
+- Style state cannot authorize durable facts.
+- NPC voice differences are visible in transcripts and measurable by the style judge.
+
+## Milestone 19: Prefix Cache and Cross-Turn Reuse
+
+Goal: Make caching improve normal play latency, not only replay idempotency.
+
+Current status: turn-scoped advisor caching exists. Because run ids include `turn_id`, this is
+correct for replay but weak for cross-turn acceleration.
+
+Implementation work:
+
+- Keep turn-scoped advisor cache unchanged for deterministic replay.
+- Add versioned stable prefix builders for system prompts, package manifests, resolver/tool schemas,
+  rules summaries, and style profiles.
+- Place stable prompt sections before volatile turn context for providers that support prompt
+  caching.
+- Record stable prefix size, cache eligibility, and provider cache metadata when available.
+- Add metrics that separate turn-cache hits from prefix-cache opportunities.
+
+Verification:
+
+- Unit tests for stable prefix hashing and version invalidation.
+- Advisor metrics tests for prefix-size and cache-eligibility fields.
+- Online A/B on a provider with prompt caching when available.
+
+Acceptance:
+
+- Replay safety remains unchanged.
+- Stable context is versioned and reused across turns.
+- Repeated play in the same ruleset/scenario shows lower provider-side latency where caching is
+  supported.
+
+## Milestone 20: Rules Plugin API and Thin Rules DSL
+
+Goal: Make new rulesets easier to add without widening core graph logic.
+
+Current status: resolver families and package-owned rules exist. The boundary should become more
+explicit and plugin-oriented before adding many real rulesets.
+
+Implementation work:
+
+- Standardize a ruleset plugin lifecycle:
+  - prepare;
+  - resolve;
+  - explain public result.
+- Define a thin JSON rules DSL for procedures, approach/stat ids, allowed modifiers, result bands,
+  opportunities, and authorized effects.
+- Ensure rules advisors can select only loaded ids.
+- Ensure resolvers emit an authoritative consequence envelope consumed by Narrator.
+- Add at least one fiction-first or move-based smoke ruleset to validate non-target-number play.
+
+Verification:
+
+- Plugin contract tests for prepare, resolve, and explain-public.
+- Cross-ruleset golden cases where one fictional action maps differently by loaded ruleset.
+- Architecture guardrail scan proving new ruleset terms stay out of core source.
+
+Acceptance:
+
+- Adding a new ruleset requires content/plugin/tests, not core graph edits.
+- Narrator never invents rule consequences outside the resolver envelope.
+- The runtime supports more than numeric target-family resolvers.
+
+## Milestone 21: Scenario Transition Predicates
+
+Goal: Replace action keyword transition matching with package-owned structured triggers.
+
+Current status: scenario transition behavior is package-validated and advisor-guided, but richer
+deterministic predicates are still a known risk.
+
+Implementation work:
+
+- Add structured transition predicates or triggers to scenario packages.
+- Let Scenario Director output trigger evidence and candidate transition ids.
+- Validate transitions against package predicates, current state, scene set, and patch authority.
+- Keep legacy `action_keywords` compatibility but mark it deprecated in docs and tests.
+
+Verification:
+
+- Transition tests cover success, failure, partial success, passive waiting, wrong direction, and
+  investigation.
+- A new scenario transitions without `action_keywords`.
+- Source scan proves no scenario-specific transition logic enters core graph.
+
+Acceptance:
+
+- Scene transitions feel like GM judgment but remain package-owned and replayable.
+- Hidden scene content is revealed only through validated transition/reveal patches.
+- Complex scenarios can advance without brittle action keyword lists.
+
+## Milestone 22: Semi-Open Long Play and Observer System
+
+Goal: Move beyond deterministic scripted long-play into semi-open play quality evaluation.
+
+Current status: deterministic 50-turn long-play checks repetition, unresolved hooks, memory QA,
+replay, and trace coverage. Future work needs player-simulator and observer agents.
+
+Implementation work:
+
+- Add a semi-open player simulator that acts only from visible transcript and public state.
+- Add an observer judge for pacing, hook lifecycle, memory use, style consistency, repetition, and
+  player agency.
+- Track unresolved hook creation, updates, resolution, and stale hooks over 50-100 turns.
+- Ensure long-play failures produce actionable roadmap categories.
+- Add cost and timeout controls so incomplete online long-play still yields a diagnostic report.
+
+Verification:
+
+- 50-turn semi-open playtest with observer judge.
+- 100-turn technical stress test for replay and durable idempotency.
+- Memory QA across early, middle, and late session facts.
+
+Acceptance:
+
+- Semi-open play remains coherent for at least 50 turns.
+- 100-turn stress does not duplicate durable state.
+- Observer findings can be grouped into roadmap items.
+
+## Milestone 23: Play Profiles and Delivery Quality
+
+Goal: Make the default CLI playable without requiring the user to understand experimental flags.
+
+Current status: baseline implemented. `trpg play` now exposes `--profile
+fast|balanced|theatrical` plus `--local`, progress, JSON, session, ruleset, and scenario options.
+The old experiment switches are hidden from normal play help. `trpg eval online-playtest` also
+accepts `--profile` while keeping explicit experiment flags for A/B reproduction.
+
+Implementation work:
+
+- Add `--profile fast|balanced|theatrical` to `trpg play` and online eval.
+  - Done.
+- Define profile defaults:
+  - `fast`: micro-gates, parallel review, compact contracts, fast runtime budget;
+  - `balanced`: stable multi-advisor path, legacy contracts, balanced runtime budget;
+  - `theatrical`: legacy contracts and theatrical runtime budget, ready for future style work.
+  - Done as profile config; conditional advisors and style judge remain future milestones.
+- Keep explicit expert flags as overrides.
+  - Done for online eval; play keeps hidden compatibility flags.
+- Improve progress reporting to show stages such as retrieval, rules, scenario, narration, critic,
+  and memory.
+  - Already present and now profile-independent.
+- Document profile tradeoffs in user-facing docs.
+  - Partially done in production notes; fuller user docs remain follow-up.
+
+Verification:
+
+- CLI tests cover profile defaults, hidden play experiment flags, and eval experiment flags.
+- 2-5 turn online smoke for each profile.
+- Interactive smoke verifies progress output and session resume still work.
+
+Acceptance:
+
+- A user can start play with one profile choice instead of several experimental flags.
+- The default profile is stable enough for normal solo play.
+- Progress output explains what the GM is waiting on during slow LLM calls.
+
 ## Release Gates
 
 ### Technical Reliability Gate
@@ -635,15 +996,21 @@ Acceptance:
 - No resolver bypass for risky uncertain actions.
 - Player agency violations are below the configured threshold.
 - Long-play transcript remains coherent after at least 50 turns.
+- New style metrics do not regress reliability metrics.
+- Online smoke reports node latency, fallback counts, clarification rate, and profile settings.
 
 ## Immediate Next Development Sequence
 
-1. Implement Milestone 1 durable graph runtime enough to support safe replay.
-2. Implement Milestone 2 advisor schemas and role-specific runner.
-3. Implement Milestone 3 intent arbiter and downgrade keyword routing to fallback.
-4. Implement Milestone 5 scenario director with validated transition patches.
-5. Implement Milestone 7 critic guardrail before expanding play content.
-6. Expand Milestone 9 eval datasets after every graph change.
+1. Milestone 14: add runtime profiling and latency budgets so online slowness is diagnosable.
+2. Milestone 15: implement context budgeting and indexed content retrieval.
+3. Milestone 16: implement conditional advisor scheduling while preserving safety gates.
+4. Milestone 17: split Archivist fact assembly from Narrator prose generation.
+5. Milestone 18: add style state and human-likeness evaluation.
+6. Milestone 19: add provider-friendly stable prefix caching and cross-turn reuse metrics.
+7. Milestone 20: standardize rules plugin APIs and a thin rules DSL.
+8. Milestone 21: replace scenario action keywords with structured transition predicates.
+9. Milestone 22: add semi-open long-play and observer evaluation.
+10. Milestone 23: package runtime choices into `fast`, `balanced`, and `theatrical` play profiles.
 
-This order prioritizes reliability boundaries before adding more creative intelligence. The result
-should be a system that becomes more flexible without becoming harder to trust.
+This order assumes Milestones 0-13 remain the reliability foundation. The next phase should optimize
+the path through that foundation rather than adding heavier always-on agents.

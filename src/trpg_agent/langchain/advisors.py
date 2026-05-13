@@ -345,15 +345,22 @@ def _advisor_metrics(
     attempts: list[dict[str, str]],
     schema_prompt: object,
 ) -> dict[str, str]:
-    prompt_chars = (
-        len(player_input)
-        + len(json.dumps(context, ensure_ascii=False, default=str))
-        + len(json.dumps(schema_prompt, ensure_ascii=False, default=str))
-    )
+    context_key_chars = {
+        str(key): len(json.dumps(value, ensure_ascii=False, default=str))
+        for key, value in sorted(context.items(), key=lambda item: str(item[0]))
+    }
+    player_input_chars = len(player_input)
+    context_chars = len(json.dumps(context, ensure_ascii=False, default=str))
+    schema_chars = len(json.dumps(schema_prompt, ensure_ascii=False, default=str))
+    prompt_chars = player_input_chars + context_chars + schema_chars
     response_chars = sum(len(str(attempt.get("raw_output", ""))) for attempt in attempts)
     return {
         "elapsed_ms": str(elapsed_ms),
         "estimated_prompt_chars": str(prompt_chars),
+        "player_input_chars": str(player_input_chars),
+        "context_chars": str(context_chars),
+        "schema_chars": str(schema_chars),
+        "context_key_chars_json": json.dumps(context_key_chars, ensure_ascii=False),
         "estimated_response_chars": str(response_chars),
         "attempt_count": str(len(attempts)),
     }

@@ -90,6 +90,7 @@ def test_session_cli_start_play_recap_inspect_and_export(tmp_path) -> None:
         app,
         [
             "play",
+            "--local",
             "--session-id",
             "cli-session",
             "--input",
@@ -150,6 +151,22 @@ def test_session_cli_start_play_recap_inspect_and_export(tmp_path) -> None:
     )
     assert quality.exit_code == 0
     assert "resolver_bypass_count: 0" in quality.output
+
+
+def test_eval_observation_report_cli_outputs_json(tmp_path) -> None:
+    runner = CliRunner()
+    env = {"TRPG_AGENT_SQLITE": str(tmp_path / "observation.sqlite")}
+
+    result = runner.invoke(
+        app,
+        ["eval", "observation-report", "--source", "store", "--json"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["source"] == "store"
+    assert "advisor_event_count" in payload
 
 
 def test_session_cli_list_includes_counts_and_json(tmp_path) -> None:
@@ -423,16 +440,52 @@ def test_eval_advisor_metrics_cli_summarizes_and_compares(tmp_path) -> None:
     assert comparison["delta"]["avg_response_chars_reduction_pct"] == 50.0
 
 
-def test_play_help_lists_experiment_and_progress_flags() -> None:
+def test_play_help_lists_profile_and_hides_experiment_flags() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["play", "--help"])
 
     assert result.exit_code == 0
-    assert "--single-turn-advisor" in result.output
-    assert "--parallel-review" in result.output
-    assert "--advisor-contracts" in result.output
+    assert "--profile" in result.output
+    assert "--single-turn-advisor" not in result.output
+    assert "--parallel-review" not in result.output
+    assert "--advisor-contracts" not in result.output
+    assert "--micro-gates" not in result.output
+    assert "--use-llm" not in result.output
     assert "--progress" in result.output
     assert "--no-progress" in result.output
+
+
+def test_play_profile_resolver_sets_expected_flags() -> None:
+    from trpg_agent.app.cli import _resolve_play_profile
+
+    fast = _resolve_play_profile("fast")
+    assert fast.use_llm is True
+    assert fast.micro_gates is True
+    assert fast.parallel_review is True
+    assert fast.advisor_contracts == "compact"
+    assert fast.runtime_budget_profile == "fast"
+
+    local = _resolve_play_profile("fast", local=True)
+    assert local.use_llm is False
+    assert local.micro_gates is False
+    assert local.parallel_review is False
+    assert local.advisor_contracts == "legacy"
+
+    overridden = _resolve_play_profile("balanced", micro_gates=True, advisor_contracts="compact")
+    assert overridden.micro_gates is True
+    assert overridden.advisor_contracts == "compact"
+
+
+def test_online_playtest_help_keeps_eval_experiment_flags() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["eval", "online-playtest", "--help"])
+
+    assert result.exit_code == 0
+    assert "--profile" in result.output
+    assert "--single-turn-advis" in result.output
+    assert "--micro-gates" in result.output
+    assert "--parallel-review" in result.output
+    assert "--advisor-contracts" in result.output
 
 
 def test_interactive_play_creates_character_and_prints_resume(tmp_path) -> None:

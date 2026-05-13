@@ -19,6 +19,7 @@ from trpg_agent.graph.build_turn_graph import (
     retrieve_context_parallel,
 )
 from trpg_agent.graph.runtime import (
+    _runtime_profile,
     checkpoint_path_for,
     durable_turn_graph,
     invoke_turn_graph,
@@ -104,9 +105,45 @@ def test_stream_turn_graph_reports_progress_nodes(tmp_path: Path) -> None:
         )
 
     assert result["final_output"]
+    assert result["runtime_profile"]["budget_profile"] == "balanced"
+    assert result["runtime_profile"]["node_count"] >= 1
+    assert result["runtime_profile"]["total_elapsed_ms"] >= 0
+    assert result["runtime_profile"]["slowest_nodes"]
+    assert result["runtime_profile"]["slowest_nodes"][0]["category"]
+    retrieval_trace = next(
+        event for event in result["trace_events"] if event["node"] == "retrieve_content_spans"
+    )
+    parallel_trace = next(
+        event for event in result["trace_events"] if event["node"] == "retrieve_context_parallel"
+    )
+    assert retrieval_trace["diagnostics"]["search_backend"] in {"sqlite_fts", "scan_fallback"}
+    assert "branch_elapsed_ms" in parallel_trace
+    assert parallel_trace["context_budget"]["mode"] == "shadow"
     assert "load_runtime_context" in seen_nodes
     assert "retrieve_context_parallel" in seen_nodes
     assert "persist_turn" in seen_nodes
+
+
+def test_runtime_profile_counts_fallback_and_timeout_markers() -> None:
+    profile = _runtime_profile(
+        state={
+            "trace_events": [
+                {"node": "advisor", "fallback": True, "timeout_seconds": 90},
+                {"node": "advisor", "advisor_error": "The read operation timed out"},
+                {"node": "micro_gate", "gate_traces": [{"error": "timeout"}]},
+            ]
+        },
+        nodes=[
+            {"node": "advisor", "elapsed_ms": 42, "sequence": 1},
+            {"node": "narrate", "elapsed_ms": 7, "sequence": 2},
+        ],
+        total_elapsed_ms=49,
+    )
+
+    assert profile["fallback_count"] == 1
+    assert profile["timeout_count"] == 2
+    assert profile["advisor_timeout_count"] == 2
+    assert profile["slowest_nodes"][0]["node"] == "advisor"
 
 
 def test_recorded_info_query_does_not_become_entry_clarification() -> None:

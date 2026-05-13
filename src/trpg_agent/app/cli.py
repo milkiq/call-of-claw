@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import uuid
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -27,6 +28,7 @@ from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.eval.advisor_metrics import compare_advisor_metrics, summarize_advisor_metrics
 from trpg_agent.eval.judge import run_llm_judge, run_static_quality_gate
 from trpg_agent.eval.live import run_live_eval
+from trpg_agent.eval.observation_report import build_observation_report
 from trpg_agent.eval.online_playtest import run_online_playtest
 from trpg_agent.eval.playtest import build_session_quality_summary, run_scripted_long_play
 from trpg_agent.eval.regression import run_regression
@@ -54,6 +56,48 @@ memory_app = typer.Typer(no_args_is_help=True)
 roadmap_app = typer.Typer(no_args_is_help=True)
 session_app = typer.Typer(no_args_is_help=True)
 console = Console()
+
+
+@dataclass(frozen=True)
+class PlayProfileConfig:
+    name: str
+    use_llm: bool
+    micro_gates: bool
+    single_turn_advisor: bool
+    parallel_review: bool
+    advisor_contracts: str
+    runtime_budget_profile: str
+
+
+PLAY_PROFILE_DEFAULTS: dict[str, PlayProfileConfig] = {
+    "balanced": PlayProfileConfig(
+        name="balanced",
+        use_llm=True,
+        micro_gates=False,
+        single_turn_advisor=False,
+        parallel_review=False,
+        advisor_contracts="legacy",
+        runtime_budget_profile="balanced",
+    ),
+    "fast": PlayProfileConfig(
+        name="fast",
+        use_llm=True,
+        micro_gates=True,
+        single_turn_advisor=False,
+        parallel_review=True,
+        advisor_contracts="compact",
+        runtime_budget_profile="fast",
+    ),
+    "theatrical": PlayProfileConfig(
+        name="theatrical",
+        use_llm=True,
+        micro_gates=False,
+        single_turn_advisor=False,
+        parallel_review=False,
+        advisor_contracts="legacy",
+        runtime_budget_profile="theatrical",
+    ),
+}
 
 GRAPH_PROGRESS_LABELS = {
     "receive_input": "接收行动",
@@ -392,6 +436,37 @@ def eval_advisor_metrics(
     console.print(json.dumps(payload, ensure_ascii=False, indent=2), markup=False)
 
 
+@eval_app.command("observation-report")
+def eval_observation_report(
+    source: Annotated[str, typer.Option("--source")] = "both",
+    limit: Annotated[int, typer.Option("--limit")] = 50,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Summarize runtime, advisor, context, fallback, and timeout diagnostics."""
+    if source not in {"reports", "store", "both"}:
+        console.print("[red]--source must be reports, store, or both.[/red]")
+        raise typer.Exit(2)
+    config = load_config()
+    store = SqliteStore(config.sqlite_path)
+    store.migrate()
+    report = build_observation_report(
+        store=store,
+        reports_dir=config.data_dir / "online-playtests",
+        source=source,  # type: ignore[arg-type]
+        limit=limit,
+    )
+    rendered = (
+        json.dumps(report.model_dump(), ensure_ascii=False, indent=2)
+        if json_output
+        else report.to_markdown()
+    )
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered, encoding="utf-8")
+    typer.echo(rendered)
+
+
 @eval_app.command("long-play")
 def eval_long_play(
     turns: Annotated[int, typer.Option("--turns")] = 50,
@@ -417,13 +492,23 @@ def eval_long_play(
 def eval_online_playtest(
     turns: Annotated[int, typer.Option("--turns")] = 100,
     min_score: Annotated[int, typer.Option("--min-score")] = 4,
+    profile: Annotated[str, typer.Option("--profile")] = "balanced",
     player_mode: Annotated[str, typer.Option("--player-mode")] = "policy",
     judge_mode: Annotated[str, typer.Option("--judge-mode")] = "auto",
     per_call_timeout_seconds: Annotated[int, typer.Option("--per-call-timeout-seconds")] = 90,
-    single_turn_advisor: Annotated[bool, typer.Option("--single-turn-advisor")] = False,
-    micro_gates: Annotated[bool, typer.Option("--micro-gates")] = False,
-    parallel_review: Annotated[bool, typer.Option("--parallel-review")] = False,
-    advisor_contracts: Annotated[str, typer.Option("--advisor-contracts")] = "legacy",
+    single_turn_advisor: Annotated[
+        bool | None,
+        typer.Option("--single-turn-advisor/--no-single-turn-advisor"),
+    ] = None,
+    micro_gates: Annotated[
+        bool | None,
+        typer.Option("--micro-gates/--no-micro-gates"),
+    ] = None,
+    parallel_review: Annotated[
+        bool | None,
+        typer.Option("--parallel-review/--no-parallel-review"),
+    ] = None,
+    advisor_contracts: Annotated[str | None, typer.Option("--advisor-contracts")] = None,
     session_id: Annotated[str | None, typer.Option("--session-id")] = None,
     ruleset_id: Annotated[str | None, typer.Option("--ruleset-id")] = None,
     scenario_id: Annotated[str | None, typer.Option("--scenario-id")] = None,
@@ -431,21 +516,28 @@ def eval_online_playtest(
 ) -> None:
     """Run an online GM long-play test and write the full transcript."""
     config = load_config()
-    advisor_contracts = _normalize_advisor_contracts(advisor_contracts)
+    profile_config = _resolve_play_profile(
+        profile,
+        micro_gates=micro_gates,
+        single_turn_advisor=single_turn_advisor,
+        parallel_review=parallel_review,
+        advisor_contracts=advisor_contracts,
+    )
+    model_metadata: dict[str, str] = {}
     try:
         model_config = load_model_config(config.root_dir / "llm.config.json")
+        model_metadata = {
+            **{key: str(value) for key, value in describe_model(model_config).items()},
+            **_profile_metadata(profile_config),
+        }
         configure_langsmith(
             config,
             {
-                **{key: str(value) for key, value in describe_model(model_config).items()},
+                **model_metadata,
                 "eval_kind": "online-playtest",
                 "turns": str(turns),
                 "judge_mode": judge_mode,
                 "per_call_timeout_seconds": str(per_call_timeout_seconds),
-                "single_turn_advisor": str(single_turn_advisor),
-                "micro_gates": str(micro_gates),
-                "parallel_review": str(parallel_review),
-                "advisor_contracts": advisor_contracts,
             },
         )
         model = build_chat_model(model_config)
@@ -459,15 +551,17 @@ def eval_online_playtest(
             per_call_timeout_seconds=(
                 per_call_timeout_seconds if per_call_timeout_seconds > 0 else None
             ),
-            single_turn_advisor=single_turn_advisor,
-            micro_gates=micro_gates,
-            parallel_review=parallel_review,
-            advisor_contracts=advisor_contracts,
+            profile=profile_config.name,
+            runtime_budget_profile=profile_config.runtime_budget_profile,
+            single_turn_advisor=profile_config.single_turn_advisor,
+            micro_gates=profile_config.micro_gates,
+            parallel_review=profile_config.parallel_review,
+            advisor_contracts=profile_config.advisor_contracts,
             session_id=session_id,
             ruleset_id=ruleset_id,
             scenario_id=scenario_id,
             output_dir=output_dir,
-            model_metadata={key: str(value) for key, value in describe_model(model_config).items()},
+            model_metadata=model_metadata,
         )
     except Exception as error:
         console.print(f"[red]online playtest failed:[/red] {error}")
@@ -857,19 +951,19 @@ def _resolve_play_package_ids(
 def _build_play_model(
     *,
     config: Any,
-    use_llm: bool,
+    profile_config: PlayProfileConfig,
     session_id: str,
     ruleset_id: str,
     scenario_id: str,
-    micro_gates: bool,
-    single_turn_advisor: bool = False,
-    parallel_review: bool = False,
-    advisor_contracts: str = "legacy",
 ) -> tuple[BaseChatModel | None, dict[str, str]]:
-    if not use_llm:
-        return None, {}
+    profile_metadata = _profile_metadata(profile_config)
+    if not profile_config.use_llm:
+        return None, profile_metadata
     model_config = load_model_config(config.root_dir / "llm.config.json")
-    model_metadata = {key: str(value) for key, value in describe_model(model_config).items()}
+    model_metadata = {
+        **{key: str(value) for key, value in describe_model(model_config).items()},
+        **profile_metadata,
+    }
     configure_langsmith(
         config,
         {
@@ -877,10 +971,6 @@ def _build_play_model(
             "session_id": session_id,
             "ruleset_id": ruleset_id,
             "scenario_id": scenario_id,
-            "micro_gates": str(micro_gates),
-            "single_turn_advisor": str(single_turn_advisor),
-            "parallel_review": str(parallel_review),
-            "advisor_contracts": advisor_contracts,
         },
     )
     return build_chat_model(model_config), model_metadata
@@ -895,10 +985,7 @@ def _run_play_turn(
     scenario_id: str,
     content_dir: Path,
     sqlite_path: Path,
-    micro_gates: bool,
-    single_turn_advisor: bool,
-    parallel_review: bool,
-    advisor_contracts: str,
+    profile_config: PlayProfileConfig,
     model_metadata: dict[str, str],
     progress: GraphProgressReporter | None = None,
 ) -> dict[str, Any]:
@@ -911,10 +998,12 @@ def _run_play_turn(
         "sqlite_path": str(sqlite_path),
         "ruleset_id": ruleset_id,
         "scenario_id": scenario_id,
-        "micro_gates_mode": micro_gates,
-        "single_turn_advisor_mode": single_turn_advisor,
-        "parallel_review_mode": parallel_review,
-        "advisor_contract_mode": advisor_contracts,
+        "play_profile": profile_config.name,
+        "runtime_budget_profile": profile_config.runtime_budget_profile,
+        "micro_gates_mode": profile_config.micro_gates,
+        "single_turn_advisor_mode": profile_config.single_turn_advisor,
+        "parallel_review_mode": profile_config.parallel_review,
+        "advisor_contract_mode": profile_config.advisor_contracts,
         "checkpoint_mode": "sqlite",
         "model_metadata": model_metadata,
     }
@@ -930,6 +1019,8 @@ def _play_result_payload(result: dict[str, Any]) -> dict[str, Any]:
         "narration_plan": result.get("narration_plan", {}),
         "tool_results": result.get("tool_results", []),
         "trace_events": result.get("trace_events", []),
+        "runtime_profile": result.get("runtime_profile", {}),
+        "runtime_metadata": result.get("runtime_metadata", {}),
     }
 
 
@@ -943,11 +1034,7 @@ def _print_play_result(result: dict[str, Any], *, json_output: bool) -> None:
 def _run_interactive_play_loop(
     *,
     session_id: str | None,
-    use_llm: bool,
-    micro_gates: bool,
-    single_turn_advisor: bool,
-    parallel_review: bool,
-    advisor_contracts: str,
+    profile_config: PlayProfileConfig,
     progress_enabled: bool,
     json_output: bool,
     ruleset_id: str | None,
@@ -966,14 +1053,10 @@ def _run_interactive_play_loop(
     )
     model, model_metadata = _build_play_model(
         config=config,
-        use_llm=use_llm,
+        profile_config=profile_config,
         session_id=resolved_session_id,
         ruleset_id=selected_ruleset,
         scenario_id=selected_scenario,
-        micro_gates=micro_gates,
-        single_turn_advisor=single_turn_advisor,
-        parallel_review=parallel_review,
-        advisor_contracts=advisor_contracts,
     )
 
     had_state = store.get_session_state(resolved_session_id) is not None
@@ -1042,10 +1125,7 @@ def _run_interactive_play_loop(
                         scenario_id=selected_scenario,
                         content_dir=config.content_dir,
                         sqlite_path=config.sqlite_path,
-                        micro_gates=micro_gates,
-                        single_turn_advisor=single_turn_advisor,
-                        parallel_review=parallel_review,
-                        advisor_contracts=advisor_contracts,
+                        profile_config=profile_config,
                         model_metadata=model_metadata,
                         progress=reporter,
                     )
@@ -1069,6 +1149,59 @@ def _normalize_advisor_contracts(value: str) -> str:
         console.print("[red]--advisor-contracts must be 'legacy' or 'compact'.[/red]")
         raise typer.Exit(2)
     return normalized
+
+
+def _resolve_play_profile(
+    profile: str,
+    *,
+    local: bool = False,
+    use_llm: bool | None = None,
+    micro_gates: bool | None = None,
+    single_turn_advisor: bool | None = None,
+    parallel_review: bool | None = None,
+    advisor_contracts: str | None = None,
+) -> PlayProfileConfig:
+    normalized = profile.strip().lower()
+    if normalized not in PLAY_PROFILE_DEFAULTS:
+        console.print("[red]--profile must be fast, balanced, or theatrical.[/red]")
+        raise typer.Exit(2)
+    resolved = PLAY_PROFILE_DEFAULTS[normalized]
+    if advisor_contracts is not None:
+        resolved = replace(
+            resolved,
+            advisor_contracts=_normalize_advisor_contracts(advisor_contracts),
+        )
+    if use_llm is not None:
+        resolved = replace(resolved, use_llm=use_llm)
+    if micro_gates is not None:
+        resolved = replace(resolved, micro_gates=micro_gates)
+    if single_turn_advisor is not None:
+        resolved = replace(resolved, single_turn_advisor=single_turn_advisor)
+    if parallel_review is not None:
+        resolved = replace(resolved, parallel_review=parallel_review)
+    if local:
+        resolved = replace(
+            resolved,
+            use_llm=False,
+            micro_gates=False,
+            single_turn_advisor=False,
+            parallel_review=False,
+            advisor_contracts="legacy",
+        )
+    return resolved
+
+
+def _profile_metadata(profile_config: PlayProfileConfig) -> dict[str, str]:
+    return {
+        "profile": profile_config.name,
+        "play_profile": profile_config.name,
+        "runtime_budget_profile": profile_config.runtime_budget_profile,
+        "use_llm": str(profile_config.use_llm),
+        "micro_gates": str(profile_config.micro_gates),
+        "single_turn_advisor": str(profile_config.single_turn_advisor),
+        "parallel_review": str(profile_config.parallel_review),
+        "advisor_contracts": profile_config.advisor_contracts,
+    }
 
 
 def _print_session_recap(store: SqliteStore, session_id: str) -> None:
@@ -1294,11 +1427,24 @@ app.add_typer(session_app, name="session")
 @app.command("play")
 def play(
     player_input: Annotated[str | None, typer.Option("--input", "-i")] = None,
-    use_llm: Annotated[bool, typer.Option("--use-llm")] = False,
-    micro_gates: Annotated[bool, typer.Option("--micro-gates")] = False,
-    single_turn_advisor: Annotated[bool, typer.Option("--single-turn-advisor")] = False,
-    parallel_review: Annotated[bool, typer.Option("--parallel-review")] = False,
-    advisor_contracts: Annotated[str, typer.Option("--advisor-contracts")] = "legacy",
+    profile: Annotated[str, typer.Option("--profile")] = "balanced",
+    use_llm: Annotated[bool | None, typer.Option("--use-llm/--no-use-llm", hidden=True)] = None,
+    micro_gates: Annotated[
+        bool | None,
+        typer.Option("--micro-gates/--no-micro-gates", hidden=True),
+    ] = None,
+    single_turn_advisor: Annotated[
+        bool | None,
+        typer.Option("--single-turn-advisor/--no-single-turn-advisor", hidden=True),
+    ] = None,
+    parallel_review: Annotated[
+        bool | None,
+        typer.Option("--parallel-review/--no-parallel-review", hidden=True),
+    ] = None,
+    advisor_contracts: Annotated[
+        str | None,
+        typer.Option("--advisor-contracts", hidden=True),
+    ] = None,
     local: Annotated[bool, typer.Option("--local")] = False,
     progress: Annotated[bool, typer.Option("--progress/--no-progress")] = True,
     json_output: Annotated[bool, typer.Option("--json")] = False,
@@ -1307,15 +1453,19 @@ def play(
     scenario_id: Annotated[str | None, typer.Option("--scenario-id")] = None,
 ) -> None:
     """Run one turn, or enter an interactive play loop when --input is omitted."""
-    advisor_contracts = _normalize_advisor_contracts(advisor_contracts)
+    profile_config = _resolve_play_profile(
+        profile,
+        local=local,
+        use_llm=use_llm,
+        micro_gates=micro_gates,
+        single_turn_advisor=single_turn_advisor,
+        parallel_review=parallel_review,
+        advisor_contracts=advisor_contracts,
+    )
     if player_input is None:
         _run_interactive_play_loop(
             session_id=session_id,
-            use_llm=not local,
-            micro_gates=True,
-            single_turn_advisor=single_turn_advisor,
-            parallel_review=parallel_review,
-            advisor_contracts=advisor_contracts,
+            profile_config=profile_config,
             progress_enabled=progress,
             json_output=json_output,
             ruleset_id=ruleset_id,
@@ -1336,14 +1486,10 @@ def play(
     )
     model, model_metadata = _build_play_model(
         config=config,
-        use_llm=use_llm and not local,
+        profile_config=profile_config,
         session_id=resolved_session_id,
         ruleset_id=selected_ruleset,
         scenario_id=selected_scenario,
-        micro_gates=micro_gates,
-        single_turn_advisor=single_turn_advisor,
-        parallel_review=parallel_review,
-        advisor_contracts=advisor_contracts,
     )
     try:
         with durable_turn_graph(sqlite_path=config.sqlite_path, model=model) as graph:
@@ -1356,17 +1502,14 @@ def play(
                     scenario_id=selected_scenario,
                     content_dir=config.content_dir,
                     sqlite_path=config.sqlite_path,
-                    micro_gates=micro_gates,
-                    single_turn_advisor=single_turn_advisor,
-                    parallel_review=parallel_review,
-                    advisor_contracts=advisor_contracts,
+                    profile_config=profile_config,
                     model_metadata=model_metadata,
                     progress=reporter,
                 )
     except Exception as error:
         console.print(f"[red]play failed:[/red] {error}")
-        if use_llm and not local:
-            console.print("Retry without `--use-llm` to run the local fallback graph.")
+        if profile_config.use_llm:
+            console.print("Retry with `--local` to run the local fallback graph.")
         raise typer.Exit(1) from error
     _print_play_result(result, json_output=json_output)
 

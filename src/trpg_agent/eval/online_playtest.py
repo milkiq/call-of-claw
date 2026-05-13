@@ -65,6 +65,8 @@ def run_online_playtest(
     player_mode: Literal["policy", "llm"] = "policy",
     judge_mode: Literal["auto", "llm", "static"] = "auto",
     per_call_timeout_seconds: int | None = 90,
+    profile: str = "balanced",
+    runtime_budget_profile: str | None = None,
     single_turn_advisor: bool = False,
     micro_gates: bool = False,
     parallel_review: bool = False,
@@ -119,6 +121,8 @@ def run_online_playtest(
                     "ruleset_id": ruleset_id,
                     "scenario_id": scenario_id,
                     "checkpoint_mode": "sqlite",
+                    "play_profile": profile,
+                    "runtime_budget_profile": runtime_budget_profile or profile,
                     "eval_smoke_mode": smoke_fast_path,
                     "single_turn_advisor_mode": single_turn_advisor,
                     "micro_gates_mode": micro_gates,
@@ -157,6 +161,8 @@ def run_online_playtest(
                 "ruleset_id": ruleset_id,
                 "scenario_id": scenario_id,
                 "checkpoint_mode": "sqlite",
+                "play_profile": profile,
+                "runtime_budget_profile": runtime_budget_profile or profile,
                 "eval_smoke_mode": smoke_fast_path,
                 "single_turn_advisor_mode": single_turn_advisor,
                 "micro_gates_mode": micro_gates,
@@ -172,7 +178,9 @@ def run_online_playtest(
         requested_turns=turns,
         replay_restored=bool(replay.get("replayed_turn")),
     )
+    runtime_summary = _runtime_summary_from_trace(trace)
     findings = _online_findings_from_metrics(metrics)
+    findings.extend(_online_findings_from_runtime(runtime_summary))
     judge_scorecard = None
     llm_judge_used = _online_should_run_llm_judge(
         judge_mode=judge_mode,
@@ -231,6 +239,8 @@ def run_online_playtest(
             "judge_mode": judge_mode,
             "llm_judge_used": str(llm_judge_used),
             "smoke_fast_path": str(smoke_fast_path),
+            "profile": profile,
+            "play_profile": profile,
             "single_turn_advisor": str(single_turn_advisor),
             "micro_gates": str(micro_gates),
             "parallel_review": str(parallel_review),
@@ -242,6 +252,15 @@ def run_online_playtest(
             "scenario_id": scenario_id or "",
             "transcript_path": str(transcript_path),
             "report_path": str(report_path),
+            "runtime_budget_profile": str(runtime_summary.get("budget_profile", "")),
+            "runtime_total_elapsed_ms": str(runtime_summary.get("total_elapsed_ms", 0)),
+            "runtime_slowest_nodes": str(runtime_summary.get("slowest_nodes_text", "")),
+            "runtime_fallback_count": str(runtime_summary.get("fallback_count", 0)),
+            "runtime_timeout_count": str(runtime_summary.get("timeout_count", 0)),
+            "runtime_advisor_timeout_count": str(
+                runtime_summary.get("advisor_timeout_count", 0)
+            ),
+            "runtime_node_count": str(runtime_summary.get("node_count", 0)),
             **(model_metadata or {}),
             **metrics.to_metadata(),
         },
@@ -260,6 +279,7 @@ def run_online_playtest(
             {
                 "result": result.model_dump(),
                 "metrics": metrics.model_dump(),
+                "runtime_profile": runtime_summary,
                 "transcript": transcript,
                 "trace_sample": _sample_trace(trace),
             },
@@ -472,6 +492,7 @@ def _trace_entry_from_result(turn_number: int, result: dict[str, Any]) -> dict[s
         "turn": turn_number,
         "turn_id": result.get("turn_id"),
         "trace_events": result.get("trace_events", []),
+        "runtime_profile": result.get("runtime_profile", {}),
         "routing_decision": result.get("routing_decision", {}),
         "micro_gate_results": result.get("micro_gate_results", {}),
         "turn_plan": result.get("turn_plan", {}),
@@ -493,6 +514,68 @@ def _sample_transcript(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _sample_trace(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sampled_turns = {entry["turn"] for entry in _sample_transcript(trace)}
     return [entry for entry in trace if entry.get("turn") in sampled_turns]
+
+
+def _runtime_summary_from_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
+    profiles_by_turn = [
+        (entry.get("turn"), entry.get("runtime_profile", {}))
+        for entry in trace
+        if isinstance(entry.get("runtime_profile"), dict)
+    ]
+    profiles = [profile for _, profile in profiles_by_turn]
+    slow_nodes: list[dict[str, Any]] = []
+    for turn, profile in profiles_by_turn:
+        for node in profile.get("slowest_nodes", []):
+            if not isinstance(node, dict):
+                continue
+            slow_nodes.append(
+                {
+                    "turn": turn,
+                    "node": str(node.get("node", "")),
+                    "category": str(node.get("category", "graph_orchestration")),
+                    "elapsed_ms": int(node.get("elapsed_ms", 0)),
+                    "sequence": int(node.get("sequence", 0)),
+                }
+            )
+    slow_nodes = sorted(slow_nodes, key=lambda item: item["elapsed_ms"], reverse=True)[:10]
+    category_elapsed_ms: dict[str, int] = {}
+    category_node_count: dict[str, int] = {}
+    for profile in profiles:
+        for category, elapsed in profile.get("category_elapsed_ms", {}).items():
+            category_elapsed_ms[str(category)] = category_elapsed_ms.get(str(category), 0) + int(
+                elapsed
+            )
+        for category, count in profile.get("category_node_count", {}).items():
+            category_node_count[str(category)] = category_node_count.get(str(category), 0) + int(
+                count
+            )
+    budget_profile = ""
+    for profile in profiles:
+        if profile.get("budget_profile"):
+            budget_profile = str(profile.get("budget_profile"))
+            break
+    return {
+        "budget_profile": budget_profile,
+        "turn_count": len(profiles),
+        "total_elapsed_ms": sum(int(profile.get("total_elapsed_ms", 0)) for profile in profiles),
+        "node_count": sum(int(profile.get("node_count", 0)) for profile in profiles),
+        "fallback_count": sum(int(profile.get("fallback_count", 0)) for profile in profiles),
+        "timeout_count": sum(int(profile.get("timeout_count", 0)) for profile in profiles),
+        "advisor_timeout_count": sum(
+            int(profile.get("advisor_timeout_count", 0)) for profile in profiles
+        ),
+        "category_elapsed_ms": category_elapsed_ms,
+        "category_node_count": category_node_count,
+        "slowest_nodes": slow_nodes,
+        "slowest_nodes_text": _runtime_slowest_nodes_text(slow_nodes),
+    }
+
+
+def _runtime_slowest_nodes_text(slow_nodes: list[dict[str, Any]]) -> str:
+    return "; ".join(
+        f"turn{node.get('turn')}:{node.get('node')}={node.get('elapsed_ms')}ms"
+        for node in slow_nodes[:5]
+    )
 
 
 def _online_findings_from_metrics(metrics: Any) -> list[EvalFinding]:
@@ -579,6 +662,39 @@ def _online_findings_from_metrics(metrics: Any) -> list[EvalFinding]:
                     f"({metrics.memory_qa_accuracy:.2f})"
                 ),
                 suggested_area="memory.eval",
+            )
+        )
+    return findings
+
+
+def _online_findings_from_runtime(runtime_summary: dict[str, Any]) -> list[EvalFinding]:
+    findings: list[EvalFinding] = []
+    timeout_count = int(runtime_summary.get("timeout_count", 0))
+    advisor_timeout_count = int(runtime_summary.get("advisor_timeout_count", 0))
+    fallback_count = int(runtime_summary.get("fallback_count", 0))
+    if timeout_count:
+        findings.append(
+            EvalFinding(
+                case_id="online-playtest-runtime-timeout",
+                dimension="infrastructure",
+                severity="high",
+                message="Online playtest trace included timeout markers.",
+                evidence=(
+                    f"timeout_count={timeout_count}, "
+                    f"advisor_timeout_count={advisor_timeout_count}"
+                ),
+                suggested_area="graph.runtime",
+            )
+        )
+    if fallback_count:
+        findings.append(
+            EvalFinding(
+                case_id="online-playtest-runtime-fallback",
+                dimension="infrastructure",
+                severity="medium",
+                message="Online playtest used fallback paths that must be inspected.",
+                evidence=f"fallback_count={fallback_count}",
+                suggested_area="graph.runtime",
             )
         )
     return findings

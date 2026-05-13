@@ -18,6 +18,9 @@ compiled package.
   dice, target, success count, and band.
 - No scenario-specific scene logic in the graph. Scene titles, secrets, clocks, transitions, and
   endings come from compiled scenario packages.
+- No style layer may authorize facts. GM persona, tone, pacing, sensory palette, and NPC voice can
+  shape wording only; they cannot create canon, world patches, hidden reveals, rule effects, or
+  player choices.
 - No durable state changes from prose. Durable facts must be tool results, world patches, session
   state, or append-only canon events.
 - No LLM bypass of deterministic adjudication. Risky actions must call the loaded resolver even if
@@ -100,3 +103,7 @@ compiled package.
 - The current long-play runner is deterministic and scripted. It now checks repeated output,
   unresolved hook quality, and 50-turn memory QA, but future work still needs semi-open
   player-simulator runs and observer/post-session judge agents.
+- Online live runs can pass while still hiding provider read timeouts behind safe fallbacks. Future
+  milestones must surface per-node latency, fallback counts, and profile settings in reports.
+- Improving human-like GM voice requires an explicit style state and style judge. It must not be
+  implemented by loosening hidden-information, resolver, or durable-state guardrails.

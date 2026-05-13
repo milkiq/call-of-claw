@@ -15,6 +15,8 @@ class GraphState(TypedDict, total=False):
     active_package_ids: list[str]
     active_extension_ids: list[str]
     model_metadata: dict[str, Any]
+    play_profile: str
+    runtime_budget_profile: str
     eval_smoke_mode: bool
     parallel_review_mode: bool
     single_turn_advisor_mode: bool
@@ -27,6 +29,7 @@ class GraphState(TypedDict, total=False):
     character_context: dict[str, Any]
     recent_canon: list[str]
     retrieved_spans: list[dict[str, Any]]
+    context_budget: dict[str, Any]
     memory_hits: list[dict[str, Any]]
     player_memory_hits: list[dict[str, Any]]
     package_profiles: list[dict[str, Any]]
@@ -47,3 +50,4 @@ class GraphState(TypedDict, total=False):
     final_output: str
     trace_refs: list[str]
     trace_events: list[dict[str, Any]]
+    runtime_profile: dict[str, Any]
