@@ -18,8 +18,9 @@ long-play evaluation, and user-facing play profiles.
   choice, or unsupported authority claims by substring or keyword checks over player input. Those
   decisions must come from structured advisor outputs.
 - Core graph must not classify a ruleset-specific action mode.
-- Local no-model mode is only a structural debug fallback. It may parse explicit `NdM` dice syntax
-  and slash commands, but it must not guess natural-language intent, risk, or target categories.
+- Local no-model mode is only a structural debug fallback. It may parse slash commands, but it must
+  not guess natural-language intent, risk, target categories, or mechanically interpret `NdM` dice
+  expressions inside ordinary player prose.
 - Ruleset-specific adjudication belongs in compiled ruleset packages and resolver extensions.
 - Scenario-specific GM requirements, secrets, scenes, clocks, NPCs, clues, and endings belong in
   compiled scenario packages.
@@ -29,8 +30,15 @@ long-play evaluation, and user-facing play profiles.
   facts must come from tool results, world patches, or canon events.
 - Risky and uncertain actions must go through the loaded resolver. The graph must not allow LLMs to
   bypass resolver calls with direct world patches or prose success.
+- Rule dice are resolver-owned. LLMs may request rules resolution and suggest loaded rule ids, but
+  they must not choose final dice expressions or dice-pool sizes. Free manual rolls must use the
+  out-of-band `/roll <NdM>` command and are not authoritative rules results.
 - GM-only content may be used for GM reasoning, but player-facing output must not reveal it unless
   play has established access.
+- LLM context loading must go through the programmatic context firewall. Do not pass raw
+  `retrieved_spans`, full `package_profiles`, full `tool_results`, or full `turn_plan` directly to
+  player-facing LLM nodes; use role-specific context packets and keep reason codes in trace
+  metadata rather than prompt text.
 - LLM-facing instruction prompts and framework-generated internal advisor fields must be English.
   Player input, retrieved content, and content-package data may be multilingual; final
   player-facing text must match the player's language.

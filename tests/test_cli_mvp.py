@@ -105,8 +105,30 @@ def test_session_cli_start_play_recap_inspect_and_export(tmp_path) -> None:
     )
     assert play.exit_code == 0
     play_payload = json.loads(play.output)
-    assert play_payload["turn_plan"]["decision"] == "risky_action"
-    assert play_payload["tool_results"]
+    assert play_payload["turn_plan"]["decision"] == "free_action"
+
+    manual_roll = runner.invoke(
+        app,
+        [
+            "play",
+            "--local",
+            "--session-id",
+            "cli-session",
+            "--input",
+            "/roll 2d6 smoke",
+            "--ruleset-id",
+            "sum_target_smoke",
+            "--scenario-id",
+            "storm_watch_survival",
+            "--json",
+        ],
+        env=env,
+    )
+    assert manual_roll.exit_code == 0
+    roll_payload = json.loads(manual_roll.output)
+    assert roll_payload["kind"] == "manual_roll"
+    assert roll_payload["manual_roll"]["expression"] == "2d6"
+    assert roll_payload["manual_roll"]["authoritative"] is False
 
     recap = runner.invoke(
         app,
@@ -460,16 +482,18 @@ def test_play_profile_resolver_sets_expected_flags() -> None:
 
     fast = _resolve_play_profile("fast")
     assert fast.use_llm is True
-    assert fast.micro_gates is True
+    assert fast.micro_gates is False
     assert fast.parallel_review is True
-    assert fast.advisor_contracts == "compact"
+    assert fast.advisor_contracts == "legacy"
     assert fast.runtime_budget_profile == "fast"
+    assert fast.context_budget_mode == "enforced"
 
     local = _resolve_play_profile("fast", local=True)
     assert local.use_llm is False
     assert local.micro_gates is False
     assert local.parallel_review is False
     assert local.advisor_contracts == "legacy"
+    assert local.context_budget_mode == "shadow"
 
     overridden = _resolve_play_profile("balanced", micro_gates=True, advisor_contracts="compact")
     assert overridden.micro_gates is True

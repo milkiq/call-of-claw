@@ -9,20 +9,11 @@ from trpg_agent.tools.content import (
     load_content_span,
     search_content,
 )
-from trpg_agent.tools.dice import RollDiceInput, roll_dice_once
 from trpg_agent.tools.patches import ApplyWorldPatchInput
 
 
 def build_langchain_tools() -> list[StructuredTool]:
     return [
-        StructuredTool.from_function(
-            func=roll_dice_once,
-            name="roll_dice",
-            description=(
-                "Roll dice deterministically from an expression, roll id, and optional seed."
-            ),
-            args_schema=RollDiceInput,
-        ),
         StructuredTool.from_function(
             func=search_content,
             name="search_content",

@@ -62,7 +62,6 @@ def test_compiled_ruleset_resolver_replays(tmp_path: Path) -> None:
         content_dir=str(root / "content"),
         ruleset_id="lasers_feelings_smoke",
         action="强行修理导航 1d6",
-        requested_roll="1d6",
         session_id="s1",
         turn_id="t1",
         sqlite_path=str(sqlite_path),
@@ -71,7 +70,6 @@ def test_compiled_ruleset_resolver_replays(tmp_path: Path) -> None:
         content_dir=str(root / "content"),
         ruleset_id="lasers_feelings_smoke",
         action="强行修理导航 1d6",
-        requested_roll="1d6",
         session_id="s1",
         turn_id="t1",
         sqlite_path=str(sqlite_path),
@@ -79,6 +77,7 @@ def test_compiled_ruleset_resolver_replays(tmp_path: Path) -> None:
 
     assert first == second
     assert first["approach"] == "lasers"
+    assert first["dice_expression"] == "1d6"
     assert first["dice_result"]["roll_id"] == "t1:resolver:lasers_feelings_smoke:1"
     assert first["band"] in {"failure", "success_with_cost", "full_success", "critical_success"}
 
@@ -90,7 +89,6 @@ def test_exact_target_emits_pending_rule_opportunity(tmp_path: Path) -> None:
         content_dir=str(root / "content"),
         ruleset_id="lasers_feelings_smoke",
         action="强行修理导航 1d6",
-        requested_roll="1d6",
         session_id="exact-seed",
         turn_id="exact-3",
         sqlite_path=str(tmp_path / "resolver.sqlite"),
@@ -212,7 +210,6 @@ def test_third_resolver_family_runs_without_core_graph_changes(tmp_path: Path) -
         content_dir=str(root / "content"),
         ruleset_id="percentile_smoke",
         action="I carefully inspect the failing antenna",
-        requested_roll="1d100",
         session_id="s1",
         turn_id="percentile-1",
         sqlite_path=str(tmp_path / "resolver.sqlite"),

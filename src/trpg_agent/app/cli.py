@@ -48,6 +48,7 @@ from trpg_agent.langchain.tracing import configure_langsmith
 from trpg_agent.memory.canon import import_canon_jsonl
 from trpg_agent.memory.store import SqliteStore
 from trpg_agent.scenario.runtime import start_session
+from trpg_agent.tools.dice import roll_dice_once
 
 app = typer.Typer(no_args_is_help=True)
 content_app = typer.Typer(no_args_is_help=True)
@@ -67,6 +68,7 @@ class PlayProfileConfig:
     parallel_review: bool
     advisor_contracts: str
     runtime_budget_profile: str
+    context_budget_mode: str
 
 
 PLAY_PROFILE_DEFAULTS: dict[str, PlayProfileConfig] = {
@@ -78,15 +80,17 @@ PLAY_PROFILE_DEFAULTS: dict[str, PlayProfileConfig] = {
         parallel_review=False,
         advisor_contracts="legacy",
         runtime_budget_profile="balanced",
+        context_budget_mode="shadow",
     ),
     "fast": PlayProfileConfig(
         name="fast",
         use_llm=True,
-        micro_gates=True,
+        micro_gates=False,
         single_turn_advisor=False,
         parallel_review=True,
-        advisor_contracts="compact",
+        advisor_contracts="legacy",
         runtime_budget_profile="fast",
+        context_budget_mode="enforced",
     ),
     "theatrical": PlayProfileConfig(
         name="theatrical",
@@ -96,6 +100,7 @@ PLAY_PROFILE_DEFAULTS: dict[str, PlayProfileConfig] = {
         parallel_review=False,
         advisor_contracts="legacy",
         runtime_budget_profile="theatrical",
+        context_budget_mode="shadow",
     ),
 }
 
@@ -1000,6 +1005,7 @@ def _run_play_turn(
         "scenario_id": scenario_id,
         "play_profile": profile_config.name,
         "runtime_budget_profile": profile_config.runtime_budget_profile,
+        "context_budget_mode": profile_config.context_budget_mode,
         "micro_gates_mode": profile_config.micro_gates,
         "single_turn_advisor_mode": profile_config.single_turn_advisor,
         "parallel_review_mode": profile_config.parallel_review,
@@ -1013,7 +1019,8 @@ def _run_play_turn(
 
 
 def _play_result_payload(result: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
+        "kind": result.get("kind", "gm_turn"),
         "final_output": result.get("final_output", ""),
         "turn_plan": result.get("turn_plan", {}),
         "narration_plan": result.get("narration_plan", {}),
@@ -1022,6 +1029,9 @@ def _play_result_payload(result: dict[str, Any]) -> dict[str, Any]:
         "runtime_profile": result.get("runtime_profile", {}),
         "runtime_metadata": result.get("runtime_metadata", {}),
     }
+    if result.get("manual_roll"):
+        payload["manual_roll"] = result["manual_roll"]
+    return payload
 
 
 def _print_play_result(result: dict[str, Any], *, json_output: bool) -> None:
@@ -1114,6 +1124,20 @@ def _run_interactive_play_loop(
             if command == "/session":
                 _print_interactive_session(store, resolved_session_id)
                 continue
+            if command == "/roll" or command.startswith("/roll "):
+                try:
+                    result = _run_manual_roll_command(
+                        store=store,
+                        session_id=resolved_session_id,
+                        ruleset_id=selected_ruleset,
+                        scenario_id=selected_scenario,
+                        command_text=text,
+                    )
+                except ValueError as error:
+                    console.print(f"roll failed: {error}", markup=False)
+                    continue
+                _print_play_result(result, json_output=json_output)
+                continue
             try:
                 progress_active = progress_enabled and not json_output
                 with GraphProgressReporter(enabled=progress_active) as reporter:
@@ -1139,8 +1163,79 @@ def _run_interactive_play_loop(
 
 
 def _print_interactive_help() -> None:
-    console.print("Commands: /help, /recap, /session, /quit", markup=False)
+    console.print("Commands: /help, /recap, /session, /roll <NdM>, /quit", markup=False)
     console.print("Type any other text as your character's action.", markup=False)
+
+
+def _run_manual_roll_command(
+    *,
+    store: SqliteStore,
+    session_id: str,
+    ruleset_id: str | None,
+    scenario_id: str | None,
+    command_text: str,
+) -> dict[str, Any]:
+    parts = command_text.strip().split(maxsplit=2)
+    if len(parts) < 2 or parts[0].lower() != "/roll":
+        raise ValueError("use /roll <NdM> [reason]")
+    expression = parts[1]
+    reason = parts[2].strip() if len(parts) > 2 else ""
+    turn_index = len(store.list_turns(session_id)) + 1
+    turn_id = f"{session_id}-manual-roll-{turn_index:03d}"
+    roll_id = f"{turn_id}:roll:1"
+    result = roll_dice_once(expression=expression, roll_id=roll_id, seed=session_id)
+    manual_roll = {
+        **result,
+        "reason": reason,
+        "authoritative": False,
+    }
+    reason_text = f"（{reason}）" if reason else ""
+    final_output = (
+        f"手动掷骰{reason_text}：{result['expression']} -> {result['rolls']}，"
+        f"总计 {result['total']}。这不是规则判定结果。"
+    )
+    trace = {
+        "kind": "manual_roll",
+        "authoritative": False,
+        "manual_roll": manual_roll,
+        "trace_events": [
+            {
+                "node": "manual_roll_command",
+                "expression": result["expression"],
+                "roll_id": roll_id,
+                "authoritative": False,
+            }
+        ],
+    }
+    store.upsert_session(
+        session_id=session_id,
+        ruleset_id=ruleset_id,
+        scenario_id=scenario_id,
+    )
+    store.insert_turn(
+        turn_id=turn_id,
+        session_id=session_id,
+        player_input=command_text,
+        output=final_output,
+        trace=trace,
+    )
+    store.insert_dice_roll(
+        roll_id=roll_id,
+        turn_id=turn_id,
+        expression=result["expression"],
+        result=manual_roll,
+    )
+    return {
+        "kind": "manual_roll",
+        "final_output": final_output,
+        "turn_plan": {"decision": "answer", "tool_requests": []},
+        "narration_plan": {},
+        "tool_results": [],
+        "trace_events": trace["trace_events"],
+        "runtime_profile": {},
+        "runtime_metadata": {},
+        "manual_roll": manual_roll,
+    }
 
 
 def _normalize_advisor_contracts(value: str) -> str:
@@ -1187,6 +1282,7 @@ def _resolve_play_profile(
             single_turn_advisor=False,
             parallel_review=False,
             advisor_contracts="legacy",
+            context_budget_mode="shadow",
         )
     return resolved
 
@@ -1196,6 +1292,7 @@ def _profile_metadata(profile_config: PlayProfileConfig) -> dict[str, str]:
         "profile": profile_config.name,
         "play_profile": profile_config.name,
         "runtime_budget_profile": profile_config.runtime_budget_profile,
+        "context_budget_mode": profile_config.context_budget_mode,
         "use_llm": str(profile_config.use_llm),
         "micro_gates": str(profile_config.micro_gates),
         "single_turn_advisor": str(profile_config.single_turn_advisor),
@@ -1484,6 +1581,21 @@ def play(
         ruleset_id=ruleset_id or existing_session.get("ruleset_id"),
         scenario_id=scenario_id or existing_session.get("scenario_id"),
     )
+    command_text = player_input.strip()
+    if command_text.lower() == "/roll" or command_text.lower().startswith("/roll "):
+        try:
+            result = _run_manual_roll_command(
+                store=store,
+                session_id=resolved_session_id,
+                ruleset_id=selected_ruleset,
+                scenario_id=selected_scenario,
+                command_text=command_text,
+            )
+        except ValueError as error:
+            console.print(f"[red]roll failed:[/red] {error}")
+            raise typer.Exit(2) from error
+        _print_play_result(result, json_output=json_output)
+        return
     model, model_metadata = _build_play_model(
         config=config,
         profile_config=profile_config,

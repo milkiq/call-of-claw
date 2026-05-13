@@ -23,8 +23,8 @@ Core obligations:
   context, tool results, or applied patches.
 - If an action is risky and uncertain, request the currently loaded rules resolver or a
   deterministic tool instead of resolving it yourself.
-- Never ask the player to roll dice manually. The runtime must call the loaded resolver or
-  deterministic dice tool and then report the result.
+- Never ask the player to roll dice manually. The runtime must call the loaded resolver and then
+  report the result.
 - If an action is obvious and uncontested, treat it as a free action.
 - If a statement asserts unsupported authority, explain the boundary and offer grounded
   alternatives.
@@ -263,8 +263,8 @@ Do not ask the player to roll dice manually. If resolution is needed, set requir
 and let the deterministic resolver roll.
 
 For resolver requests, use only machine-readable ids from the loaded ruleset for approach_id.
-requested_roll must be null unless the player explicitly supplied a simple NdM dice expression
-such as "2d6"; never put natural-language dice procedures in requested_roll.
+Do not output dice expressions or dice pool sizes. Natural-language dice expressions in player input
+are not mechanically authoritative; only the loaded resolver decides the final dice expression.
 
 Only grant extra dice, expert status, prepared status, help, advantage, or equivalent modifiers when
 they are explicit in loaded rules, tool results, or machine-readable character_context. Do not infer

@@ -62,10 +62,10 @@
     graph_output_prefix: "[turn_plan:answer]"
     output_not_contains: ["双频共振"]
 
-- id: turn-explicit-dice-tool
+- id: turn-risky-action-resolver-tool
   kind: turn
-  description: Explicit dice expressions should resolve through the loaded ruleset resolver.
-  input: 风险行动 1d6
+  description: Risky action fixtures should resolve through the loaded ruleset resolver.
+  input: 风险行动
   tags: [turn, tools]
   expectation:
     intent_kind: action
@@ -97,7 +97,7 @@
 - id: turn-percentile-survival-cross-product
   kind: turn
   description: A non-default ruleset and non-default scenario should run without core graph edits.
-  input: 风险行动 1d100
+  input: 风险行动
   ruleset_id: percentile_smoke
   scenario_id: storm_watch_survival
   tags: [turn, genericity, milestone-11]

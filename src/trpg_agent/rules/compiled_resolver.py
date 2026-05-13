@@ -9,7 +9,7 @@ from trpg_agent.content.compiled import CompiledRuleset, ResolutionBand, load_co
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.memory.store import SqliteStore
 from trpg_agent.rules.resolver_runtime import ResolverRegistry
-from trpg_agent.tools.dice import parse_expression, roll_dice_once
+from trpg_agent.tools.dice import roll_dice_once
 from trpg_agent.tools.patches import WorldPatch
 
 RESOLVER_REGISTRY_VERSION = "resolver-registry-v1"
@@ -23,7 +23,6 @@ class RulesetResolverInput(BaseModel):
     risk: str = "risky_uncertain"
     character_context: dict[str, Any] = Field(default_factory=dict)
     scene_context: dict[str, Any] = Field(default_factory=dict)
-    requested_roll: str | None = None
     session_id: str = "default"
     turn_id: str = "turn"
     sqlite_path: str | None = None
@@ -54,7 +53,6 @@ def run_ruleset_resolver(
     risk: str = "risky_uncertain",
     character_context: dict[str, Any] | None = None,
     scene_context: dict[str, Any] | None = None,
-    requested_roll: str | None = None,
     session_id: str = "default",
     turn_id: str = "turn",
     sqlite_path: str | None = None,
@@ -67,7 +65,6 @@ def run_ruleset_resolver(
         risk=risk,
         character_context=character_context or {},
         scene_context=scene_context or {},
-        requested_roll=requested_roll,
         session_id=session_id,
         turn_id=turn_id,
         sqlite_path=sqlite_path,
@@ -95,9 +92,8 @@ class ThresholdDiceResolver:
     ) -> RulesetResolverResult:
         selected_approach = _select_approach(ruleset, request.approach, request.action)
         target = int(request.character_context.get("number", ruleset.default_target))
-        requested_roll = _ruleset_roll_or_none(ruleset, request.requested_roll)
-        dice_count = _dice_count(ruleset, request.character_context, requested_roll)
-        expression = requested_roll or f"{dice_count}d{ruleset.dice.base_sides}"
+        dice_count = _dice_count(ruleset, request.character_context)
+        expression = f"{dice_count}d{ruleset.dice.base_sides}"
         roll_id = f"{request.turn_id}:resolver:{ruleset.package_id}:1"
         dice_result = _load_or_roll(
             expression=expression,
@@ -186,9 +182,8 @@ class SumTargetResolver:
     ) -> RulesetResolverResult:
         selected_approach = _select_approach(ruleset, request.approach, request.action)
         target = int(request.character_context.get("target_total", ruleset.default_target))
-        requested_roll = _ruleset_roll_or_none(ruleset, request.requested_roll)
-        dice_count = _dice_count(ruleset, request.character_context, requested_roll)
-        expression = requested_roll or f"{dice_count}d{ruleset.dice.base_sides}"
+        dice_count = _dice_count(ruleset, request.character_context)
+        expression = f"{dice_count}d{ruleset.dice.base_sides}"
         roll_id = f"{request.turn_id}:resolver:{ruleset.package_id}:1"
         dice_result = _load_or_roll(
             expression=expression,
@@ -236,8 +231,7 @@ class PercentileUnderResolver:
     ) -> RulesetResolverResult:
         selected_approach = _select_approach(ruleset, request.approach, request.action)
         target = int(request.character_context.get("percentile_target", ruleset.default_target))
-        requested_roll = _ruleset_roll_or_none(ruleset, request.requested_roll)
-        expression = requested_roll or f"{ruleset.dice.base_dice}d{ruleset.dice.base_sides}"
+        expression = f"{ruleset.dice.base_dice}d{ruleset.dice.base_sides}"
         roll_id = f"{request.turn_id}:resolver:{ruleset.package_id}:1"
         dice_result = _load_or_roll(
             expression=expression,
@@ -308,27 +302,12 @@ def _select_approach(ruleset: CompiledRuleset, approach: str | None, action: str
 def _dice_count(
     ruleset: CompiledRuleset,
     character_context: dict[str, Any],
-    requested_roll: str | None,
 ) -> int:
-    if requested_roll:
-        return ruleset.dice.base_dice
     count = ruleset.dice.base_dice
     for key in ["prepared", "expert", "helped"]:
         if character_context.get(key):
             count += 1
     return max(1, min(count, ruleset.dice.max_dice))
-
-
-def _ruleset_roll_or_none(ruleset: CompiledRuleset, requested_roll: str | None) -> str | None:
-    if not requested_roll:
-        return None
-    try:
-        count, sides = parse_expression(requested_roll)
-    except ValueError:
-        return None
-    if sides != ruleset.dice.base_sides or not 1 <= count <= ruleset.dice.max_dice:
-        return None
-    return f"{count}d{sides}"
 
 
 def _load_or_roll(

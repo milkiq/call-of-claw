@@ -442,7 +442,6 @@ def _rules_advice_fixture(case: EvalCase) -> dict[str, object]:
         "requires_resolution": True,
         "procedure_id": None,
         "approach_id": None,
-        "requested_roll": _explicit_dice_expression(case.input or ""),
         "risk": "risky_uncertain",
         "stakes": "Offline eval fixture requires deterministic resolver resolution.",
         "clarification_question": None,
@@ -481,13 +480,6 @@ def _narration_fixture(case: EvalCase, *, decision: str) -> dict[str, object]:
         "canon_event_draft": None,
         "memory_candidates": [],
     }
-
-
-def _explicit_dice_expression(text: str) -> str | None:
-    import re
-
-    match = re.search(r"\b(\d+d\d+)\b", text.lower())
-    return match.group(1) if match else None
 
 
 def _get_dotted(payload: dict, dotted_path: str) -> object:

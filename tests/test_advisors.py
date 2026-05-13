@@ -162,7 +162,6 @@ def test_advisor_structured_contracts_validate() -> None:
                 "requires_resolution": False,
                 "procedure_id": None,
                 "approach_id": None,
-                "requested_roll": None,
                 "risk": "none",
                 "stakes": "No risky uncertainty.",
                 "clarification_question": None,

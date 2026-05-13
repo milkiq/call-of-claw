@@ -8,9 +8,9 @@ gets only the context category needed for its contract.
 - Player input: the current player utterance, always included.
 - Visible scene context: active scene id/title/public summary, visible clock, revealed facts,
   known clues, and pending player-facing rule opportunities. GM-only fields are removed.
-- Rules context: ruleset id, resolver/profile metadata, character context, dice expression in the
-  input, and retrieved rules spans. This may include non-player-facing rules text, but not hidden
-  scenario secrets.
+- Rules context: ruleset id, resolver/profile metadata, character context, and retrieved rules
+  spans. This may include non-player-facing rules text, but not hidden scenario secrets. Natural
+  language dice expressions in player input are treated as text, not as resolver parameters.
 - Target context: visible scene context plus public package references and public retrieved spans.
   Used only to decide whether the player target or intent needs clarification.
 - Authority context: visible scene context, recent canon, player-visible memory, and public spans.

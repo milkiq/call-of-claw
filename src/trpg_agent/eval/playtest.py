@@ -185,7 +185,6 @@ def _long_play_model_responses(scripted_inputs: list[str]) -> list[str]:
                         "requires_resolution": True,
                         "procedure_id": None,
                         "approach_id": None,
-                        "requested_roll": _explicit_dice_expression(player_input),
                         "risk": "risky_uncertain",
                         "stakes": "Long-play fixture requires deterministic resolver resolution.",
                         "clarification_question": None,
@@ -228,8 +227,6 @@ def _long_play_model_responses(scripted_inputs: list[str]) -> list[str]:
 
 
 def _long_play_fixture_route(player_input: str) -> tuple[str, str, str, bool]:
-    if _explicit_dice_expression(player_input):
-        return "risky_action", "action", "risky_action", True
     if "刚刚" in player_input:
         return "memory_recall", "memory_recall", "answer", False
     if "以后" in player_input:
@@ -249,11 +246,6 @@ def _long_play_fixture_output(*, player_input: str, decision: str) -> str:
 
 def _json_fixture(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False)
-
-
-def _explicit_dice_expression(text: str) -> str | None:
-    match = re.search(r"\b(\d+d\d+)\b", text.lower())
-    return match.group(1) if match else None
 
 
 def collect_playtest_metrics(

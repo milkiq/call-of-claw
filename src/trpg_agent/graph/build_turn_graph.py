@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 import uuid
@@ -16,7 +17,11 @@ from trpg_agent.content.packages import PackageKind
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.content.retrieval import search_registry_text_indexed
 from trpg_agent.content.visibility import AccessMode
-from trpg_agent.context_budget import build_context_budget_snapshot, compact_context_budget_trace
+from trpg_agent.context_budget import (
+    build_advisor_context,
+    build_context_budget_snapshot,
+    compact_context_budget_trace,
+)
 from trpg_agent.graph.state import GraphState
 from trpg_agent.langchain.advisors import AdvisorContractMode, AdvisorRole, invoke_advisor
 from trpg_agent.langchain.prompts import (
@@ -72,7 +77,6 @@ from trpg_agent.scenario.director import (
 from trpg_agent.scenario.runtime import load_or_initialize_world_state, sync_scene_details
 from trpg_agent.security.redaction import redact_secrets
 from trpg_agent.tools.content import load_content_span, search_content
-from trpg_agent.tools.dice import parse_expression, roll_dice_once
 from trpg_agent.tools.patches import WorldPatch, apply_world_patches
 
 TURN_GRAPH_VERSION = "turn-graph-v2"
@@ -141,12 +145,71 @@ def _runtime_metadata(state: GraphState) -> dict[str, Any]:
         "resolver_registry_version": RESOLVER_REGISTRY_VERSION,
         "checkpoint_mode": state.get("checkpoint_mode", "none"),
         "advisor_contract_mode": _advisor_contract_mode(state),
+        "context_budget_mode": _context_budget_mode(state),
         "model": state.get("model_metadata", {}),
     }
 
 
 def _advisor_contract_mode(state: Mapping[str, Any]) -> AdvisorContractMode:
     return "compact" if state.get("advisor_contract_mode") == "compact" else "legacy"
+
+
+def _context_budget_mode(state: Mapping[str, Any]) -> str:
+    mode = str(state.get("context_budget_mode") or "").strip().lower()
+    if mode in {"enforced", "shadow"}:
+        return mode
+    if state.get("play_profile") == "fast":
+        return "enforced"
+    return "shadow"
+
+
+def _context_packet(state: GraphState, role: str, **extra_context: Any) -> dict[str, Any]:
+    return build_advisor_context(
+        state,
+        role,
+        mode=_context_budget_mode(state),
+        extra_context=extra_context,
+    )
+
+
+def _structured_call_trace(
+    *,
+    role: str,
+    prompt_version: str,
+    schema_name: str,
+    elapsed_ms: int,
+    player_input: str,
+    context: Mapping[str, Any],
+    schema_prompt: object,
+    attempts: list[dict[str, str]],
+) -> dict[str, str]:
+    context_key_chars = {
+        str(key): len(json.dumps(value, ensure_ascii=False, default=str))
+        for key, value in sorted(context.items(), key=lambda item: str(item[0]))
+    }
+    response_chars = sum(len(str(attempt.get("raw_output", ""))) for attempt in attempts)
+    context_chars = len(json.dumps(context, ensure_ascii=False, default=str))
+    schema_chars = len(json.dumps(schema_prompt, ensure_ascii=False, default=str))
+    player_input_chars = len(player_input)
+    return {
+        "advisor_role": role,
+        "prompt_version": prompt_version,
+        "schema": schema_name,
+        "contract_mode": _schema_contract_mode(schema_prompt),
+        "cached": "false",
+        "elapsed_ms": str(elapsed_ms),
+        "estimated_prompt_chars": str(player_input_chars + context_chars + schema_chars),
+        "player_input_chars": str(player_input_chars),
+        "context_chars": str(context_chars),
+        "schema_chars": str(schema_chars),
+        "context_key_chars_json": json.dumps(context_key_chars, ensure_ascii=False),
+        "estimated_response_chars": str(response_chars),
+        "attempt_count": str(len(attempts)),
+    }
+
+
+def _schema_contract_mode(schema_prompt: object) -> str:
+    return "compact" if isinstance(schema_prompt, str) else "legacy"
 
 
 def _restore_existing_turn(
@@ -365,7 +428,7 @@ def retrieve_content_spans(state: GraphState) -> GraphState:
             mode=AccessMode.GM,
             limit=6,
         )
-    spans = [span.to_dict() for span in retrieval.spans]
+    spans = [_annotate_retrieved_span(span.to_dict(), state) for span in retrieval.spans]
     diagnostics = retrieval.diagnostics
     return _append_trace(
         {**state, "retrieved_spans": spans},
@@ -383,6 +446,28 @@ def retrieve_content_spans(state: GraphState) -> GraphState:
             "diagnostics": diagnostics,
         },
     )
+
+
+def _annotate_retrieved_span(span: dict[str, Any], state: GraphState) -> dict[str, Any]:
+    package_id = str(span.get("package_id") or "")
+    reference_id = str(span.get("reference_id") or "")
+    visibility = str(span.get("visibility") or "public")
+    if package_id == state.get("ruleset_id"):
+        bucket = "rules"
+        purpose = "rules_adjudication"
+    elif visibility == "gm_only":
+        bucket = "scenario_gm"
+        purpose = "gm_scenario_guidance"
+    else:
+        bucket = "scenario_public"
+        purpose = "player_visible_context"
+    return {
+        **span,
+        "citation_id": f"{package_id}:{reference_id}",
+        "bucket": bucket,
+        "mandatory": bucket == "rules",
+        "purpose": purpose,
+    }
 
 
 def retrieve_context_parallel(state: GraphState) -> GraphState:
@@ -449,14 +534,8 @@ def classify_player_intent(state: GraphState) -> GraphState:
     return _append_trace(next_state, "classify_player_intent", {"intent": "action"})
 
 
-def _dice_expression(text: str) -> str | None:
-    match = re.search(r"\b(\d+d\d+)\b", text.lower())
-    return match.group(1) if match else None
-
-
 def _resolver_tool_request(
     state: GraphState,
-    requested_roll: str | None = None,
     approach: str | None = None,
     risk: str = "risky_uncertain",
 ) -> ToolRequest:
@@ -470,7 +549,6 @@ def _resolver_tool_request(
             "risk": risk,
             "character_context": state.get("character_context", {}),
             "scene_context": state.get("world_projection", {}),
-            "requested_roll": requested_roll,
             "session_id": state.get("session_id", "default"),
             "turn_id": state.get("turn_id", "turn"),
             "sqlite_path": state.get("sqlite_path"),
@@ -500,19 +578,6 @@ def _compiled_ruleset_from_state(state: GraphState):
         return load_compiled_ruleset(_registry_from_state(state), ruleset_id)
     except Exception:
         return None
-
-
-def _safe_requested_roll(state: GraphState, value: object) -> str | None:
-    if not value:
-        return None
-    try:
-        count, sides = parse_expression(str(value))
-    except ValueError:
-        return None
-    ruleset = _compiled_ruleset_from_state(state)
-    if ruleset and (sides != ruleset.dice.base_sides or count > ruleset.dice.max_dice):
-        return None
-    return f"{count}d{sides}"
 
 
 def _canonical_approach(state: GraphState, value: object) -> str | None:
@@ -572,16 +637,6 @@ def plan_turn_locally(state: GraphState) -> GraphState:
         "results and request a resolver if risk appears."
     )
     tool_requests: list[ToolRequest] = []
-    text = state.get("player_input", "")
-    expression = _dice_expression(text)
-
-    if expression:
-        decision = "risky_action"
-        tool_requests.append(_resolver_tool_request(state, requested_roll=expression))
-        narration_brief = (
-            "The player supplied an explicit dice expression; resolution must come from the "
-            "loaded rules extension and deterministic tools."
-        )
 
     if decision == "gm_move":
         clock_request = _clock_tick_request(
@@ -617,6 +672,8 @@ def plan_turn_locally(state: GraphState) -> GraphState:
 def _tool_context() -> list[dict[str, Any]]:
     tools = []
     for tool in build_langchain_tools():
+        if tool.name == "roll_dice":
+            continue
         schema = tool.args_schema.model_json_schema() if tool.args_schema else {}
         tools.append({"name": tool.name, "description": tool.description, "schema": schema})
     return tools
@@ -732,31 +789,26 @@ def build_llm_adjudication_node(model: BaseChatModel):
             plan_schema = compact_schema_for(TurnPlan)
             plan_schema_prompt = compact_response_contract(plan_schema)
             plan_model_kwargs = {"max_tokens": 650}
+        packet = _context_packet(
+            state,
+            "core_gm",
+            mode="turn_adjudication",
+            tool_catalog=_tool_context(),
+            required_schema=plan_schema_prompt,
+        )
+        adjudication_payload = {
+            "player_input": state.get("player_input", ""),
+            "context": packet["context"],
+        }
+        started = time.perf_counter()
         raw_plan, attempts = invoke_structured_with_repair(
             model=model,
             prompt=CORE_GM_PROMPT,
             schema=plan_schema,
-            payload={
-                "player_input": state.get("player_input", ""),
-                "context": {
-                    "mode": "turn_adjudication",
-                    "ruleset_id": state.get("ruleset_id"),
-                    "scenario_id": state.get("scenario_id"),
-                    "recent_canon": state.get("recent_canon", []),
-                    "memory_hits": state.get("memory_hits", []),
-                    "player_memory_hits": state.get("player_memory_hits", []),
-                    "retrieved_spans": state.get("retrieved_spans", []),
-                    "world_projection": state.get("world_projection", {}),
-                    "character_context": state.get("character_context", {}),
-                    "package_profiles": state.get("package_profiles", []),
-                    "routing_decision": state.get("routing_decision", {}),
-                    "rules_advice": state.get("rules_advice", {}),
-                    "available_tools": _tool_context(),
-                    "required_schema": plan_schema_prompt,
-                },
-            },
+            payload=adjudication_payload,
             model_kwargs=plan_model_kwargs,
         )
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
         plan = TurnPlan.model_validate(
             (
                 adapt_compact_output(
@@ -783,6 +835,17 @@ def build_llm_adjudication_node(model: BaseChatModel):
             {
                 "decision": plan.decision,
                 "tool_requests": [r.tool_name for r in plan.tool_requests],
+                "advisor": _structured_call_trace(
+                    role="core_gm",
+                    prompt_version=CORE_GM_PROMPT_VERSION,
+                    schema_name=plan_schema.__name__,
+                    elapsed_ms=elapsed_ms,
+                    player_input=state.get("player_input", ""),
+                    context=packet["context"],
+                    schema_prompt=plan_schema_prompt,
+                    attempts=attempts,
+                ),
+                "context_packet": packet["trace"],
                 "structured_attempts": [
                     {key: value for key, value in attempt.items() if key != "raw_output"}
                     for attempt in attempts
@@ -821,7 +884,6 @@ def _micro_gate_turn_plan(state: GraphState) -> TurnPlan:
         tool_requests.append(
             _resolver_tool_request(
                 state,
-                requested_roll=_safe_requested_roll(state, rules_advice.get("requested_roll")),
                 approach=_approach_for_resolver_request(state, rules_advice.get("approach_id")),
                 risk=str(rules_advice.get("risk") or "risky_uncertain"),
             )
@@ -950,22 +1012,16 @@ def _pending_rule_opportunity_blocks_resolution(state: GraphState) -> bool:
 def build_llm_intent_arbiter_node(model: BaseChatModel):
     def route_with_intent_arbiter(state: GraphState) -> GraphState:
         try:
+            packet = _context_packet(
+                state,
+                "intent_arbiter",
+                advisor_contract="IntentRoutingDecision",
+            )
             result = invoke_advisor(
                 model=model,
                 role="intent_arbiter",
                 player_input=state.get("player_input", ""),
-                context={
-                    "ruleset_id": state.get("ruleset_id"),
-                    "scenario_id": state.get("scenario_id"),
-                    "recent_canon": state.get("recent_canon", []),
-                    "memory_hits": state.get("memory_hits", []),
-                    "player_memory_hits": state.get("player_memory_hits", []),
-                    "retrieved_spans": state.get("retrieved_spans", []),
-                    "world_projection": state.get("world_projection", {}),
-                    "character_context": state.get("character_context", {}),
-                    "package_profiles": state.get("package_profiles", []),
-                    "advisor_contract": "IntentRoutingDecision",
-                },
+                context=packet["context"],
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
                 contract_mode=_advisor_contract_mode(state),
@@ -976,6 +1032,7 @@ def build_llm_intent_arbiter_node(model: BaseChatModel):
                 "needs_rules_resolution": routing.get("needs_rules_resolution"),
                 "needs_scenario_director": routing.get("needs_scenario_director"),
                 "advisor": result.trace_metadata,
+                "context_packet": packet["trace"],
                 "structured_attempts": [
                     {key: value for key, value in attempt.items() if key != "raw_output"}
                     for attempt in result.attempts
@@ -1142,7 +1199,6 @@ def _micro_gate_context(state: GraphState, role: AdvisorRole) -> dict[str, Any]:
             "rules_retrieved_spans": _rules_retrieved_span_clip(state, limit=3),
             "visible_world": _player_visible_world_context(state),
             "character_context": state.get("character_context", {}),
-            "dice_expression_in_input": _dice_expression(state.get("player_input", "")),
         }
     if role == "target_micro_gate":
         return common | {
@@ -1323,11 +1379,10 @@ def _fallback_micro_gate_decision(
             reason=reason,
         ).model_dump()
     if role == "risk_micro_gate":
-        risky = bool(_dice_expression(state.get("player_input", "")))
         return RiskMicroGateDecision(
-            risky=risky,
-            risk="risky_uncertain" if risky else "none",
-            needs_rules_resolution=risky,
+            risky=False,
+            risk="none",
+            needs_rules_resolution=False,
             reason=reason,
         ).model_dump()
     if role == "target_micro_gate":
@@ -1725,23 +1780,20 @@ def route_after_intent_arbiter(state: GraphState) -> str:
 
 
 def _fallback_routing_decision(state: GraphState, error: Exception) -> IntentRoutingDecision:
-    expression = _dice_expression(state.get("player_input", ""))
-    route = "risky_action" if expression else "clarify"
-    kind = "action" if expression else "clarify_needed"
     return IntentRoutingDecision(
         intent=IntentClassification(
-            kind=kind,  # type: ignore[arg-type]
+            kind="clarify_needed",
             confidence=0.35,
             reason=(
                 "Intent advisor failed; structural fallback used without keyword routing: "
                 f"{error}"
             ),
         ),
-        route=route,  # type: ignore[arg-type]
-        needs_rules_resolution=bool(expression and state.get("ruleset_id")),
-        needs_scenario_director=route in {"free_action", "risky_action", "gm_move"},
+        route="clarify",
+        needs_rules_resolution=False,
+        needs_scenario_director=False,
         needs_memory_recall=False,
-        allow_direct_answer=route == "clarify",
+        allow_direct_answer=True,
         reasoning_summary="Fallback routing used because the intent advisor failed.",
         uncertainty=str(error),
         citations=[],
@@ -1751,23 +1803,16 @@ def _fallback_routing_decision(state: GraphState, error: Exception) -> IntentRou
 def build_llm_rules_adjudicator_node(model: BaseChatModel):
     def advise_rules_with_llm(state: GraphState) -> GraphState:
         try:
+            packet = _context_packet(
+                state,
+                "rules_adjudicator",
+                advisor_contract="RulesAdjudicationAdvice",
+            )
             result = invoke_advisor(
                 model=model,
                 role="rules_adjudicator",
                 player_input=state.get("player_input", ""),
-                context={
-                    "ruleset_id": state.get("ruleset_id"),
-                    "scenario_id": state.get("scenario_id"),
-                    "routing_decision": state.get("routing_decision", {}),
-                    "recent_canon": state.get("recent_canon", []),
-                    "memory_hits": state.get("memory_hits", []),
-                    "player_memory_hits": state.get("player_memory_hits", []),
-                    "retrieved_spans": state.get("retrieved_spans", []),
-                    "world_projection": state.get("world_projection", {}),
-                    "character_context": state.get("character_context", {}),
-                    "package_profiles": state.get("package_profiles", []),
-                    "advisor_contract": "RulesAdjudicationAdvice",
-                },
+                context=packet["context"],
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
                 contract_mode=_advisor_contract_mode(state),
@@ -1779,6 +1824,7 @@ def build_llm_rules_adjudicator_node(model: BaseChatModel):
                 "approach_id": advice.get("approach_id"),
                 "risk": advice.get("risk"),
                 "advisor": result.trace_metadata,
+                "context_packet": packet["trace"],
                 "structured_attempts": [
                     {key: value for key, value in attempt.items() if key != "raw_output"}
                     for attempt in result.attempts
@@ -1789,7 +1835,6 @@ def build_llm_rules_adjudicator_node(model: BaseChatModel):
                 requires_resolution=True,
                 procedure_id=None,
                 approach_id=None,
-                requested_roll=None,
                 risk="risky_uncertain",
                 stakes="Rules advisor failed; deterministic resolver fallback will decide.",
                 clarification_question=None,
@@ -1836,7 +1881,6 @@ def build_llm_single_turn_advisor_node(model: BaseChatModel):
                     requires_resolution=False,
                     procedure_id=None,
                     approach_id=None,
-                    requested_roll=None,
                     risk="none",
                     stakes="Pending question opportunity is answered without a new resolution.",
                     clarification_question=None,
@@ -1852,29 +1896,25 @@ def build_llm_single_turn_advisor_node(model: BaseChatModel):
             )
 
         try:
+            packet = _context_packet(
+                state,
+                "single_turn_advisor",
+                mode="single_turn_adjudication",
+                tool_catalog=_tool_context(),
+                advisor_contract="SingleTurnAdvisorDecision",
+            )
             result = invoke_advisor(
                 model=model,
                 role="single_turn_advisor",
                 player_input=state.get("player_input", ""),
-                context={
-                    "ruleset_id": state.get("ruleset_id"),
-                    "scenario_id": state.get("scenario_id"),
-                    "recent_canon": state.get("recent_canon", []),
-                    "memory_hits": state.get("memory_hits", []),
-                    "player_memory_hits": state.get("player_memory_hits", []),
-                    "retrieved_spans": _single_turn_visible_spans(state),
-                    "world_projection": state.get("world_projection", {}),
-                    "character_context": state.get("character_context", {}),
-                    "package_profiles": _single_turn_visible_package_profiles(state),
-                    "available_tools": _tool_context(),
-                    "advisor_contract": "SingleTurnAdvisorDecision",
-                },
+                context=packet["context"],
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
                 contract_mode=_advisor_contract_mode(state),
             )
             advice = SingleTurnAdvisorDecision.model_validate(result.output.model_dump())
             advisor_trace = result.trace_metadata
+            context_packet_trace = packet["trace"]
             structured_attempts = [
                 {key: value for key, value in attempt.items() if key != "raw_output"}
                 for attempt in result.attempts
@@ -1885,7 +1925,6 @@ def build_llm_single_turn_advisor_node(model: BaseChatModel):
                 requires_resolution=bool(routing.needs_rules_resolution),
                 procedure_id=None,
                 approach_id=None,
-                requested_roll=None,
                 risk="risky_uncertain" if routing.needs_rules_resolution else "none",
                 stakes="Single-turn advisor failed; deterministic fallback used.",
                 clarification_question=None,
@@ -1907,6 +1946,7 @@ def build_llm_single_turn_advisor_node(model: BaseChatModel):
                 reasoning_summary="Fallback used because single-turn advisor failed.",
             )
             advisor_trace = {"fallback": "true", "error": str(error)}
+            context_packet_trace = {}
             structured_attempts = []
 
         routing = advice.routing_decision.model_dump()
@@ -1937,6 +1977,7 @@ def build_llm_single_turn_advisor_node(model: BaseChatModel):
                 "requires_resolution": rules_advice.get("requires_resolution"),
                 "scenario_decision": advice.scenario_advice.decision,
                 "advisor": advisor_trace,
+                "context_packet": context_packet_trace,
                 "structured_attempts": structured_attempts,
             },
         )
@@ -2089,28 +2130,21 @@ def build_llm_narration_node(model: BaseChatModel):
                 narration_schema = compact_schema_for(NarrationPlan)
                 narration_schema_prompt = compact_response_contract(narration_schema)
                 narration_model_kwargs = {"max_tokens": 1100}
+            packet = _context_packet(state, "narrator")
+            narration_payload = {
+                "player_input": state.get("player_input", ""),
+                "schema": narration_schema_prompt,
+                "context": packet["context"],
+            }
+            started = time.perf_counter()
             raw_narration, attempts = invoke_structured_with_repair(
                 model=model,
                 prompt=NARRATION_PROMPT,
                 schema=narration_schema,
-                payload={
-                    "player_input": state.get("player_input", ""),
-                    "schema": narration_schema_prompt,
-                    "context": {
-                        "ruleset_id": state.get("ruleset_id"),
-                        "scenario_id": state.get("scenario_id"),
-                        "recent_canon": state.get("recent_canon", []),
-                        "memory_hits": state.get("player_memory_hits", []),
-                        "retrieved_spans": state.get("retrieved_spans", []),
-                        "world_projection": state.get("world_projection", {}),
-                        "character_context": state.get("character_context", {}),
-                        "scenario_director": state.get("scenario_director", {}),
-                        "turn_plan": state.get("turn_plan", {}),
-                        "tool_results": state.get("tool_results", []),
-                    },
-                },
+                payload=narration_payload,
                 model_kwargs=narration_model_kwargs,
             )
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
             narration = NarrationPlan.model_validate(
                 (
                     adapt_compact_output(
@@ -2157,6 +2191,17 @@ def build_llm_narration_node(model: BaseChatModel):
             "narrate_with_llm",
             {
                 "final_output": final_text,
+                "advisor": _structured_call_trace(
+                    role="narration",
+                    prompt_version=NARRATION_PROMPT_VERSION,
+                    schema_name=narration_schema.__name__,
+                    elapsed_ms=elapsed_ms,
+                    player_input=state.get("player_input", ""),
+                    context=packet["context"],
+                    schema_prompt=narration_schema_prompt,
+                    attempts=attempts,
+                ),
+                "context_packet": packet["trace"],
                 "structured_attempts": [
                     {key: value for key, value in attempt.items() if key != "raw_output"}
                     for attempt in attempts
@@ -2513,28 +2558,23 @@ def build_llm_critic_guardrail_node(model: BaseChatModel):
                 },
             )
         try:
+            packet = _context_packet(
+                state,
+                "critic_guardrail",
+                advisor_contract="CriticReport",
+            )
             result = invoke_advisor(
                 model=model,
                 role="critic_guardrail",
-                context={
-                    "final_text": state.get("final_output", ""),
-                    "player_input": state.get("player_input", ""),
-                    "turn_plan": state.get("turn_plan", {}),
-                    "tool_results": state.get("tool_results", []),
-                    "applied_world_projection": state.get("world_projection", {}),
-                    "scenario_director": state.get("scenario_director", {}),
-                    "recent_canon": state.get("recent_canon", []),
-                    "player_memory_hits": state.get("player_memory_hits", []),
-                    "gm_memory_hits": state.get("memory_hits", []),
-                    "retrieved_spans": state.get("retrieved_spans", []),
-                    "advisor_contract": "CriticReport",
-                },
+                player_input=state.get("player_input", "") if packet["mode"] == "enforced" else "",
+                context=packet["context"],
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
                 contract_mode=_advisor_contract_mode(state),
             )
             report = CriticReport.model_validate(result.output.model_dump())
             advisor_trace = result.trace_metadata
+            context_packet_trace = packet["trace"]
             structured_attempts = [
                 {key: value for key, value in attempt.items() if key != "raw_output"}
                 for attempt in result.attempts
@@ -2548,6 +2588,7 @@ def build_llm_critic_guardrail_node(model: BaseChatModel):
                 reasoning_summary=f"Critic advisor failed safely: {error}",
             )
             advisor_trace = {"fallback": "true", "error": str(error)}
+            context_packet_trace = {}
             structured_attempts = []
 
         final_output_before_critic = state.get("final_output", "")
@@ -2631,6 +2672,7 @@ def build_llm_critic_guardrail_node(model: BaseChatModel):
                 "repaired": repaired,
                 "findings": [finding.dimension for finding in report.findings],
                 "advisor": advisor_trace,
+                "context_packet": context_packet_trace,
                 "structured_attempts": structured_attempts,
             },
         )
@@ -2901,27 +2943,23 @@ def build_llm_memory_curator_node(model: BaseChatModel):
         if not state.get("sqlite_path"):
             return curate_memory_locally(state)
         try:
+            packet = _context_packet(
+                state,
+                "memory_curator",
+                advisor_contract="MemoryCurationDecision",
+            )
             result = invoke_advisor(
                 model=model,
                 role="memory_curator",
-                context={
-                    "player_input": state.get("player_input", ""),
-                    "final_output": state.get("final_output", ""),
-                    "turn_plan": state.get("turn_plan", {}),
-                    "narration_plan": state.get("narration_plan", {}),
-                    "critic_report": state.get("critic_report", {}),
-                    "tool_results": state.get("tool_results", []),
-                    "world_projection": state.get("world_projection", {}),
-                    "recent_canon": state.get("recent_canon", []),
-                    "memory_hits": state.get("memory_hits", []),
-                    "advisor_contract": "MemoryCurationDecision",
-                },
+                player_input=state.get("player_input", "") if packet["mode"] == "enforced" else "",
+                context=packet["context"],
                 sqlite_path=state.get("sqlite_path"),
                 turn_id=state.get("turn_id"),
                 contract_mode=_advisor_contract_mode(state),
             )
             curation = MemoryCurationDecision.model_validate(result.output.model_dump())
             advisor_trace = result.trace_metadata
+            context_packet_trace = packet["trace"]
             structured_attempts = [
                 {key: value for key, value in attempt.items() if key != "raw_output"}
                 for attempt in result.attempts
@@ -2934,6 +2972,7 @@ def build_llm_memory_curator_node(model: BaseChatModel):
                 should_write=False,
             )
             advisor_trace = {"fallback": "true", "error": str(error)}
+            context_packet_trace = {}
             structured_attempts = []
         return _append_trace(
             {**state, "memory_curation": curation.model_dump()},
@@ -2943,6 +2982,7 @@ def build_llm_memory_curator_node(model: BaseChatModel):
                 "memory_candidates": [candidate.kind for candidate in curation.memory_candidates],
                 "contradictions": curation.contradictions,
                 "advisor": advisor_trace,
+                "context_packet": context_packet_trace,
                 "structured_attempts": structured_attempts,
             },
         )
@@ -3152,7 +3192,6 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
         return _append_trace(state, "ensure_resolution_tools", {"changed": False})
     routing = state.get("routing_decision", {})
     rules_advice = state.get("rules_advice", {})
-    has_routing = bool(routing)
     rules_requires_resolution = rules_advice.get("requires_resolution")
     rules_risk = str(rules_advice.get("risk") or "").lower()
     advisor_requires_risky_resolution = bool(
@@ -3167,11 +3206,8 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
         and rules_requires_resolution is not False
     )
     risky_by_plan = plan.get("decision") == "risky_action"
-    explicit_dice_without_routing = (not has_routing) and bool(
-        _dice_expression(state.get("player_input", ""))
-    )
     if (
-        not (risky_by_route or risky_by_plan or explicit_dice_without_routing)
+        not (risky_by_route or risky_by_plan)
         or not state.get("ruleset_id")
     ):
         return _append_trace(state, "ensure_resolution_tools", {"changed": False})
@@ -3196,10 +3232,7 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
 
     next_requests: list[dict[str, Any]] = []
     has_resolver = False
-    requested_roll: str | None = _safe_requested_roll(
-        state,
-        rules_advice.get("requested_roll") or _dice_expression(state.get("player_input", "")),
-    )
+    rejected_tool_requests: list[dict[str, Any]] = []
     advised_approach = _approach_for_resolver_request(state, rules_advice.get("approach_id"))
     advised_risk = str(rules_advice.get("risk") or "risky_uncertain")
     for raw_request in state.get("tool_requests", []):
@@ -3213,14 +3246,17 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
             )
             if not arguments.get("risk") and advised_risk:
                 arguments["risk"] = advised_risk
-            arguments["requested_roll"] = (
-                _safe_requested_roll(state, arguments.get("requested_roll")) or requested_roll
-            )
+            arguments.pop("requested_roll", None)
             arguments.update(_protected_resolver_arguments(state))
             request = request.model_copy(update={"arguments": arguments})
             next_requests.append(request.model_dump())
         elif request.tool_name == "roll_dice":
-            requested_roll = _safe_requested_roll(state, request.arguments.get("expression"))
+            rejected_tool_requests.append(
+                {
+                    "tool_name": "roll_dice",
+                    "reason": "manual_roll_command_only",
+                }
+            )
         elif request.tool_name == "apply_world_patch":
             continue
         else:
@@ -3229,7 +3265,6 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
     if not has_resolver:
         resolver_request = _resolver_tool_request(
             state,
-            requested_roll=requested_roll or None,
             approach=advised_approach,
             risk=advised_risk,
         )
@@ -3237,9 +3272,7 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
 
     next_plan = dict(plan)
     next_plan["tool_requests"] = next_requests
-    if (risky_by_route or explicit_dice_without_routing) and (
-        next_plan.get("decision") != "risky_action"
-    ):
+    if risky_by_route and next_plan.get("decision") != "risky_action":
         next_plan["decision"] = "risky_action"
         next_plan["narration_brief"] = (
             "This action is risky and uncertain; the loaded rules extension must adjudicate it."
@@ -3255,7 +3288,7 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
                 for request in next_requests
                 if isinstance(request, dict)
             ],
-            "explicit_dice_without_routing": explicit_dice_without_routing,
+            "rejected_tool_requests": rejected_tool_requests,
             "risky_by_route": risky_by_route,
             "used_rules_advice": bool(rules_advice),
         },
@@ -3349,32 +3382,27 @@ def build_llm_scenario_director_node(model: BaseChatModel):
         if pre_advice:
             decision = pre_advice
             advisor_trace = {"source": "single_turn_advisor", "cached": "true"}
+            context_packet_trace = {"source": "single_turn_advisor", "cached": "true"}
             structured_attempts = [{"phase": "single_turn_scenario_advice"}]
         else:
             try:
+                packet = _context_packet(
+                    state,
+                    "scenario_director",
+                    advisor_contract="ScenarioDirectorDecision",
+                )
                 result = invoke_advisor(
                     model=model,
                     role="scenario_director",
                     player_input=state.get("player_input", ""),
-                    context={
-                        "scenario_id": state.get("scenario_id"),
-                        "ruleset_id": state.get("ruleset_id"),
-                        "world_projection": state.get("world_projection", {}),
-                        "recent_canon": state.get("recent_canon", []),
-                        "memory_hits": state.get("memory_hits", []),
-                        "player_memory_hits": state.get("player_memory_hits", []),
-                        "retrieved_spans": state.get("retrieved_spans", []),
-                        "turn_plan": state.get("turn_plan", {}),
-                        "tool_results": state.get("tool_results", []),
-                        "package_profiles": state.get("package_profiles", []),
-                        "advisor_contract": "ScenarioDirectorDecision",
-                    },
+                    context=packet["context"],
                     sqlite_path=state.get("sqlite_path"),
                     turn_id=state.get("turn_id"),
                     contract_mode=_advisor_contract_mode(state),
                 )
                 decision = ScenarioDirectorDecision.model_validate(result.output.model_dump())
                 advisor_trace = result.trace_metadata
+                context_packet_trace = packet["trace"]
                 structured_attempts = [
                     {key: value for key, value in attempt.items() if key != "raw_output"}
                     for attempt in result.attempts
@@ -3390,6 +3418,7 @@ def build_llm_scenario_director_node(model: BaseChatModel):
                     citations=[],
                 )
                 advisor_trace = {"fallback": "true", "error": str(error)}
+                context_packet_trace = {}
                 structured_attempts = []
 
         validation = validate_scenario_director_decision(
@@ -3432,6 +3461,7 @@ def build_llm_scenario_director_node(model: BaseChatModel):
                 "validated_patches": [patch.model_dump() for patch in validation.patches],
                 "rejected_patches": validation.rejected,
                 "advisor": advisor_trace,
+                "context_packet": context_packet_trace,
                 "structured_attempts": structured_attempts,
             },
         )
@@ -3547,25 +3577,7 @@ def _sentence_count(text: str) -> int:
 def _execute_tool_request(request: ToolRequest, state: GraphState) -> dict | list:
     arguments = dict(request.arguments)
     if request.tool_name == "roll_dice":
-        sqlite_path = state.get("sqlite_path")
-        roll_id = str(arguments.get("roll_id") or "")
-        if sqlite_path and roll_id:
-            store = SqliteStore(Path(sqlite_path))
-            store.migrate()
-            existing = store.get_dice_roll(roll_id)
-            if existing:
-                return existing["result"]
-        result = roll_dice_once(**arguments)
-        if sqlite_path:
-            store = SqliteStore(Path(sqlite_path))
-            store.migrate()
-            store.insert_dice_roll(
-                roll_id=result["roll_id"],
-                turn_id=state.get("turn_id"),
-                expression=result["expression"],
-                result=result,
-            )
-        return result
+        raise ValueError("roll_dice is only available through the /roll command.")
 
     if request.tool_name == "search_content":
         if not arguments.get("content_dir"):
@@ -3580,7 +3592,7 @@ def _execute_tool_request(request: ToolRequest, state: GraphState) -> dict | lis
     if request.tool_name == "run_ruleset_resolver":
         arguments.update(_protected_resolver_arguments(state))
         arguments["approach"] = _approach_for_resolver_request(state, arguments.get("approach"))
-        arguments["requested_roll"] = _safe_requested_roll(state, arguments.get("requested_roll"))
+        arguments.pop("requested_roll", None)
         return run_ruleset_resolver(**arguments)
 
     if request.tool_name == "apply_world_patch":

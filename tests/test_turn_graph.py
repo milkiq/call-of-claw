@@ -55,16 +55,13 @@ def _routing_response(
 def _rules_advice_response(
     *,
     approach_id: str | None = None,
-    requested_roll: str | None = None,
 ) -> str:
     approach_json = f'"{approach_id}"' if approach_id else "null"
-    requested_roll_json = f'"{requested_roll}"' if requested_roll else "null"
     return f"""
     {{
       "requires_resolution": true,
       "procedure_id": null,
       "approach_id": {approach_json},
-      "requested_roll": {requested_roll_json},
       "risk": "risky_uncertain",
       "stakes": "The action has uncertain consequences.",
       "clarification_question": null,
@@ -344,7 +341,7 @@ def test_micro_gate_context_clips_hidden_story_content() -> None:
     assert "secret motive" not in rendered
 
 
-def test_micro_gates_fallback_uses_only_structural_dice_for_resolution() -> None:
+def test_micro_gates_fallback_does_not_treat_text_dice_as_resolution() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
     node = build_llm_micro_gates_node(FakeListChatModel(responses=[]))
@@ -357,9 +354,9 @@ def test_micro_gates_fallback_uses_only_structural_dice_for_resolution() -> None
         }
     )
 
-    assert result["routing_decision"]["route"] == "risky_action"
-    assert result["routing_decision"]["needs_rules_resolution"] is True
-    assert result["micro_gate_results"]["risk_micro_gate"]["risky"] is True
+    assert result["routing_decision"]["route"] == "free_action"
+    assert result["routing_decision"]["needs_rules_resolution"] is False
+    assert result["micro_gate_results"]["risk_micro_gate"]["risky"] is False
     assert result["trace_events"][-1]["node"] == "run_micro_gates"
 
 
@@ -517,7 +514,6 @@ def test_pending_rule_opportunity_blocks_new_risky_resolution() -> None:
             "requires_resolution": True,
             "risk": "risky_uncertain",
             "approach_id": None,
-            "requested_roll": None,
         },
         "world_projection": {
             "pending_rule_opportunities": [
@@ -745,7 +741,6 @@ def test_single_turn_advisor_path_can_request_resolver() -> None:
                 "requires_resolution": true,
                 "procedure_id": null,
                 "approach_id": null,
-                "requested_roll": null,
                 "risk": "risky_uncertain",
                 "stakes": "The loaded resolver must decide the outcome.",
                 "clarification_question": null,
@@ -822,7 +817,6 @@ def test_single_turn_advisor_clarification_is_player_facing() -> None:
                 "requires_resolution": false,
                 "procedure_id": null,
                 "approach_id": null,
-                "requested_roll": null,
                 "risk": "none",
                 "stakes": "Clarify target.",
                 "clarification_question": "Ask the player which specific location.",
@@ -988,7 +982,6 @@ def test_high_ambiguity_target_remains_clarification_without_local_default() -> 
               "requires_resolution": true,
               "procedure_id": null,
               "approach_id": null,
-              "requested_roll": null,
               "risk": "low",
               "stakes": "A quick look can proceed with the default target.",
               "clarification_question": "Which exact entrance do you mean?",
@@ -1019,7 +1012,6 @@ def test_rules_advice_clarification_prevents_ambiguous_approach_roll() -> None:
               "requires_resolution": true,
               "procedure_id": "core_roll",
               "approach_id": "lasers",
-              "requested_roll": null,
               "risk": "risky_uncertain",
               "stakes": "The chosen focus changes the outcome.",
               "clarification_question": "你是主要用技术扫描，还是主要尝试唤醒对方？",
@@ -1257,7 +1249,6 @@ def test_intent_advisor_failure_falls_back_safely() -> None:
               "requires_resolution": true,
               "procedure_id": null,
               "approach_id": null,
-              "requested_roll": null,
               "risk": "risky_uncertain",
               "stakes": "Fallback resolver path.",
               "clarification_question": null,
@@ -1292,8 +1283,9 @@ def test_intent_advisor_failure_falls_back_safely() -> None:
         event for event in result["trace_events"] if event["node"] == "route_with_intent_arbiter"
     )
     assert route_event["fallback"] is True
-    assert result["routing_decision"]["needs_rules_resolution"] is True
-    assert result["tool_results"][0]["tool_name"] == "run_ruleset_resolver"
+    assert result["routing_decision"]["route"] == "clarify"
+    assert result["routing_decision"]["needs_rules_resolution"] is False
+    assert result["tool_results"] == []
 
 
 def test_rules_advisor_failure_keeps_resolver_path() -> None:
@@ -1396,7 +1388,7 @@ def test_resolver_request_protected_arguments_are_sanitized() -> None:
     assert result["tool_results"][0]["ok"] is True
 
 
-def test_resolver_request_drops_unparseable_advisor_roll_and_invalid_approach() -> None:
+def test_resolver_request_drops_llm_roll_and_invalid_approach() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
     from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
@@ -1404,10 +1396,7 @@ def test_resolver_request_drops_unparseable_advisor_roll_and_invalid_approach() 
     model = FakeListChatModel(
         responses=[
             _routing_response(route="risky_action", needs_rules_resolution=True),
-            _rules_advice_response(
-                approach_id="激光",
-                requested_roll="1d6 base plus bonuses from the loaded rules",
-            ),
+            _rules_advice_response(approach_id="激光"),
             """
             {
               "intent": {"kind": "action", "confidence": 0.9, "reason": "risky"},
@@ -1447,10 +1436,107 @@ def test_resolver_request_drops_unparseable_advisor_roll_and_invalid_approach() 
 
     arguments = result["tool_requests"][0]["arguments"]
     assert arguments["approach"] == "force"
-    assert arguments["requested_roll"] is None
+    assert "requested_roll" not in arguments
     assert arguments["character_context"] == {"target_total": 7}
     assert result["tool_results"][0]["ok"] is True
     assert result["tool_results"][0]["result"]["dice_expression"] == "2d6"
+
+
+def test_natural_language_dice_expression_does_not_override_resolver_dice() -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(route="risky_action", needs_rules_resolution=True),
+            _rules_advice_response(approach_id="lasers"),
+            """
+            {
+              "intent": {"kind": "action", "confidence": 0.9, "reason": "risky"},
+              "authority": {"ok": true, "reason": "grounded"},
+              "decision": "risky_action",
+              "tool_requests": [],
+              "narration_brief": "Resolve through the loaded rules.",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "final_text": "The resolver result is narrated.",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "I scan the pod and roll 2d6",
+            "ruleset_id": "lasers_feelings_smoke",
+            "turn_id": "natural-language-dice-turn",
+        }
+    )
+
+    assert result["tool_results"][0]["ok"] is True
+    assert result["tool_results"][0]["result"]["dice_expression"] == "1d6"
+
+
+def test_llm_roll_dice_request_cannot_override_resolver_dice() -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(route="risky_action", needs_rules_resolution=True),
+            _rules_advice_response(approach_id="lasers"),
+            """
+            {
+              "intent": {"kind": "action", "confidence": 0.9, "reason": "risky"},
+              "authority": {"ok": true, "reason": "grounded"},
+              "decision": "risky_action",
+              "tool_requests": [
+                {
+                  "tool_name": "roll_dice",
+                  "arguments": {"expression": "2d6", "roll_id": "llm-roll"},
+                  "reason": "incorrect direct dice request"
+                }
+              ],
+              "narration_brief": "Resolve through the loaded rules.",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "final_text": "The resolver result is narrated.",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "I scan the pod",
+            "ruleset_id": "lasers_feelings_smoke",
+            "turn_id": "llm-roll-dice-turn",
+        }
+    )
+
+    assert [request["tool_name"] for request in result["tool_requests"]] == [
+        "run_ruleset_resolver"
+    ]
+    ensure_trace = next(
+        event for event in result["trace_events"] if event["node"] == "ensure_resolution_tools"
+    )
+    assert ensure_trace["rejected_tool_requests"] == [
+        {"tool_name": "roll_dice", "reason": "manual_roll_command_only"}
+    ]
+    assert result["tool_results"][0]["ok"] is True
+    assert result["tool_results"][0]["result"]["dice_expression"] == "1d6"
 
 
 def test_failed_required_resolution_blocks_llm_narration() -> None:
@@ -1588,21 +1674,56 @@ def test_intent_arbiter_allows_question_without_keyword_fallback() -> None:
 
 
 def test_turn_graph_executes_ruleset_resolver() -> None:
-    graph = build_turn_graph()
-    result = graph.invoke({"player_input": "风险行动 1d6", "turn_id": "turn-test"})
+    planned = ensure_resolution_tools(
+        {
+            "player_input": "风险行动",
+            "ruleset_id": "lasers_feelings_smoke",
+            "turn_id": "turn-test",
+            "routing_decision": {"route": "risky_action", "needs_rules_resolution": True},
+            "rules_advice": {"requires_resolution": True, "risk": "risky_uncertain"},
+            "turn_plan": {"decision": "risky_action", "tool_requests": []},
+            "trace_events": [],
+        }
+    )
+    result = execute_deterministic_tools(planned)
 
     assert result["turn_plan"]["decision"] == "risky_action"
     assert result["tool_results"][0]["tool_name"] == "run_ruleset_resolver"
     assert result["tool_results"][0]["ok"] is True
     assert result["tool_requests"][0]["tool_name"] == "run_ruleset_resolver"
-    assert "判定结果" in result["final_output"]
 
 
 def test_resolver_result_can_transition_scene_from_compiled_scenario() -> None:
-    graph = build_turn_graph()
-    result = graph.invoke(
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(route="risky_action", needs_rules_resolution=True),
+            _rules_advice_response(approach_id="force"),
+            """
+            {
+              "intent": {"kind": "action", "confidence": 0.9, "reason": "risky"},
+              "authority": {"ok": true, "reason": "grounded"},
+              "decision": "risky_action",
+              "tool_requests": [],
+              "narration_brief": "Resolve through the loaded rules.",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "final_text": "The hatch opens after the resolver result.",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+        ]
+    )
+    result = build_turn_graph_with_model(model).invoke(
         {
-            "player_input": "I carefully force the hatch open and repair the docking clamp 2d6",
+            "player_input": "I carefully force the hatch open and repair the docking clamp",
             "ruleset_id": "sum_target_smoke",
             "scenario_id": "crystal_stop_singing_smoke",
             "session_id": "s1",

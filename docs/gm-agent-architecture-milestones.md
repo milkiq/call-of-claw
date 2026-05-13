@@ -680,10 +680,12 @@ Acceptance:
 
 Goal: Stop sending large undifferentiated context blobs and stop scanning content files every turn.
 
-Current status: partially implemented. Advisor context is clipped by role, memory uses SQLite FTS,
-and content retrieval now has an indexed SQLite backend with scan fallback. A shadow
-`ContextBudgeter` records stable prefix, scene, rules, memory, canon, retrieved public/GM,
-tool-result, and style buckets without changing advisor input yet.
+Current status: implemented for the fast profile and still observable in shadow mode for the
+balanced/theatrical profiles. Advisor input now passes through role-specific `ContextPacket`
+construction, memory uses SQLite FTS, and content retrieval has an indexed SQLite backend with scan
+fallback. The budgeter records stable prefix, scene, rules, memory, canon, retrieved public/GM,
+tool-result, and style buckets; fast-profile LLM prompts receive the enforced packet instead of the
+full graph state.
 
 Implementation work:
 
@@ -691,7 +693,8 @@ Implementation work:
   player-visible memory, recent canon, retrieved spans, and style state.
   - Done in shadow mode.
 - Give each bucket a default token/character budget and a clear clipping priority.
-  - Done as reporting budgets; enforcement remains follow-up.
+  - Done with enforced role-specific packets for the fast profile; balanced/theatrical retain shadow
+    mode until quality gates promote enforcement.
 - Add a local content index backed by SQLite FTS/BM25 while preserving the current
   `search_registry_text()` interface.
   - Done as an indexed runtime path with scan fallback.
@@ -701,14 +704,15 @@ Implementation work:
   - Done for manifest/reference mtime and package version.
 - Mark retrieved spans with bucket, visibility, citation id, and whether they are mandatory or
   discardable.
-  - Not yet done; this belongs with budget enforcement and Archivist packet construction.
+  - Done for runtime retrieved spans and context-packet copies; role filtering records machine-readable
+    reason codes in trace metadata.
 
 Verification:
 
 - Content retrieval tests cover visibility, GM-only exclusion for player contexts, CJK queries,
   package filtering, indexed retrieval diagnostics, and scan fallback surface.
-- Prompt-size regression tests currently verify shadow budget measurements; enforcement tests remain
-  a follow-up.
+- Prompt-size and context-firewall tests verify role packets, hidden-content filtering, and tool
+  result summarization.
 - Offline eval and content check pass with indexed retrieval enabled.
 
 Acceptance:
@@ -759,19 +763,26 @@ Acceptance:
 
 Goal: Separate fact assembly and disclosure policy from player-facing prose.
 
-Current status: not implemented as a named boundary. Existing nodes already contain the raw
-ingredients: retrieved spans, world projection, turn plan, scenario director state, tool results,
-canon, memory, and narration.
+Current status: first boundary implemented in the context budgeter. Narrator now consumes an
+`ArchivistTurnPacket` in enforced mode instead of raw retrieved spans. Existing nodes still keep the
+full graph state for replay/debug; the remaining work is critic enforcement against the packet and
+promotion from fast-profile enforcement to the default profile.
 
 Implementation work:
 
 - Add an `ArchivistTurnPacket` containing only authorized facts for this turn:
   current visible scene, relevant rules envelope, tool/resolver results, validated scenario
   context, unresolved hooks, allowed citations, and explicit no-go boundaries.
+  - Done for narrator context in enforced mode.
 - Let the Archivist own progressive disclosure and context budgeting.
+  - Done as deterministic role-specific packet construction; LLM context planning remains a future
+    experiment and cannot bypass visibility/budget checks.
 - Let Narrator consume only player input, the Archivist packet, and style state.
+  - Done in enforced mode.
 - Prevent Narrator from directly consuming GM-only retrieved spans or full package text.
+  - Done in enforced mode with tests.
 - Extend critic checks to verify final text stays inside the Archivist packet.
+  - Follow-up.
 
 Verification:
 
@@ -948,10 +959,14 @@ Implementation work:
 - Add `--profile fast|balanced|theatrical` to `trpg play` and online eval.
   - Done.
 - Define profile defaults:
-  - `fast`: micro-gates, parallel review, compact contracts, fast runtime budget;
-  - `balanced`: stable multi-advisor path, legacy contracts, balanced runtime budget;
+  - `fast`: stable multi-advisor path, legacy contracts, parallel review, enforced context
+    budgeting, fast runtime budget;
+  - `balanced`: stable multi-advisor path, legacy contracts, shadow context budgeting, balanced
+    runtime budget;
   - `theatrical`: legacy contracts and theatrical runtime budget, ready for future style work.
-  - Done as profile config; conditional advisors and style judge remain future milestones.
+  - Done as profile config. Micro-gates and compact contracts remain explicit online-eval A/B
+    overrides because the latest live smoke showed provider-side schema repair fallbacks and
+    first-turn clarification regressions.
 - Keep explicit expert flags as overrides.
   - Done for online eval; play keeps hidden compatibility flags.
 - Improve progress reporting to show stages such as retrieval, rules, scenario, narration, critic,

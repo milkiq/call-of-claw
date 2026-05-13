@@ -138,7 +138,6 @@ class RulesAdjudicationAdvice(BaseModel):
     requires_resolution: bool
     procedure_id: str | None = None
     approach_id: str | None = None
-    requested_roll: str | None = None
     risk: Literal["none", "low", "risky_uncertain", "high"] = "risky_uncertain"
     stakes: str
     clarification_question: str | None = None
@@ -248,7 +247,6 @@ class RulesAdviceWire(BaseModel):
     resolve: bool = False
     proc: str | None = Field(default=None, max_length=80)
     approach: str | None = Field(default=None, max_length=80)
-    roll: str | None = Field(default=None, max_length=32)
     risk: Literal["none", "low", "risky_uncertain", "high"] = "none"
     stakes: str = Field(default="", max_length=220)
     clarify: str | None = Field(default=None, max_length=220)
@@ -405,8 +403,8 @@ COMPACT_RESPONSE_CONTRACTS: dict[str, str] = {
     ),
     "RulesAdviceWire": (
         '{"resolve": bool, "proc": null|string, "approach": null|string, '
-        '"roll": null|NdM, "risk": none|low|risky_uncertain|high, '
-        '"stakes": "<=220 chars", "clarify": null|string, "refs": []}'
+        '"risk": none|low|risky_uncertain|high, "stakes": "<=220 chars", '
+        '"clarify": null|string, "refs": []}'
     ),
     "TurnPlanWire": (
         '{"decision": answer|free_action|risky_action|gm_move|boundary|clarify, '
@@ -565,7 +563,6 @@ def _adapt_rules_advice(wire: RulesAdviceWire) -> RulesAdjudicationAdvice:
         requires_resolution=wire.resolve,
         procedure_id=wire.proc,
         approach_id=wire.approach,
-        requested_roll=wire.roll,
         risk=wire.risk if wire.resolve else wire.risk,
         stakes=wire.stakes or ("Resolution needed." if wire.resolve else "No risky uncertainty."),
         clarification_question=wire.clarify,

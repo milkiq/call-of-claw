@@ -93,6 +93,7 @@ def run_online_playtest(
         player_mode=player_mode,
         turns=turns,
     ) and not single_turn_advisor and not micro_gates and advisor_contracts == "legacy"
+    context_budget_mode = "enforced" if profile == "fast" else "shadow"
 
     with durable_turn_graph(sqlite_path=config.sqlite_path, model=model) as graph:
         for index in range(1, turns + 1):
@@ -123,6 +124,7 @@ def run_online_playtest(
                     "checkpoint_mode": "sqlite",
                     "play_profile": profile,
                     "runtime_budget_profile": runtime_budget_profile or profile,
+                    "context_budget_mode": context_budget_mode,
                     "eval_smoke_mode": smoke_fast_path,
                     "single_turn_advisor_mode": single_turn_advisor,
                     "micro_gates_mode": micro_gates,
@@ -163,6 +165,7 @@ def run_online_playtest(
                 "checkpoint_mode": "sqlite",
                 "play_profile": profile,
                 "runtime_budget_profile": runtime_budget_profile or profile,
+                "context_budget_mode": context_budget_mode,
                 "eval_smoke_mode": smoke_fast_path,
                 "single_turn_advisor_mode": single_turn_advisor,
                 "micro_gates_mode": micro_gates,
@@ -253,6 +256,7 @@ def run_online_playtest(
             "transcript_path": str(transcript_path),
             "report_path": str(report_path),
             "runtime_budget_profile": str(runtime_summary.get("budget_profile", "")),
+            "context_budget_mode": context_budget_mode,
             "runtime_total_elapsed_ms": str(runtime_summary.get("total_elapsed_ms", 0)),
             "runtime_slowest_nodes": str(runtime_summary.get("slowest_nodes_text", "")),
             "runtime_fallback_count": str(runtime_summary.get("fallback_count", 0)),

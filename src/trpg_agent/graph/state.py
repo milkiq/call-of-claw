@@ -17,6 +17,7 @@ class GraphState(TypedDict, total=False):
     model_metadata: dict[str, Any]
     play_profile: str
     runtime_budget_profile: str
+    context_budget_mode: str
     eval_smoke_mode: bool
     parallel_review_mode: bool
     single_turn_advisor_mode: bool

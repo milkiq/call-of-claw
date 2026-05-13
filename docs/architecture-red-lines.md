@@ -36,8 +36,11 @@ compiled package.
   generic patch authority, scene set, and current state bounds.
 - Critic repair may alter only player-facing narration text. It must not mutate tool results,
   resolver results, world patches, memory writes, or canon.
-- Structural parsers are allowed only for machine-like syntax and commands, such as slash commands,
-  explicit `NdM` dice expressions, and output-policy guardrails.
+- Structural parsers are allowed only for machine-like syntax and commands, such as slash commands
+  and output-policy guardrails. Natural-language `NdM` dice expressions are not mechanically
+  authoritative in the GM turn graph; free dice rolls must use `/roll`.
+- Rule dice are resolver-owned. LLMs may request rules resolution and suggest loaded rule ids, but
+  they must not choose final dice expressions or dice-pool sizes.
 - Offline turn eval must be fake-advisor or fixture driven. It must not depend on the core graph
   guessing natural-language intent, risk, or target keywords.
 

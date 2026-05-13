@@ -63,10 +63,23 @@ Content retrieval records `search_backend`, `files_scanned`, `chars_scanned`, `r
 index rebuild state, and fallback status. Runtime play uses a SQLite FTS-backed content index when a
 SQLite path is available and falls back to the old scan backend if the index cannot be used.
 
-Context budgeting currently runs in shadow mode. It records bucket sizes and would-clip counts for
-stable prefix, local scene, local rules, player-visible memory, recent canon, retrieved public/GM
-spans, tool results, and style state. Shadow data must not change advisor inputs until budget
-enforcement has separate quality gates.
+Context budgeting runs in two modes. `shadow` records bucket sizes and would-clip counts for stable
+prefix, local scene, local rules, player-visible memory, recent canon, retrieved public/GM spans,
+tool results, and style state without changing advisor inputs. `enforced` builds role-specific
+`ContextPacket` inputs for LLM calls, filters by visibility, records machine-readable drop reason
+codes, and sends summaries such as `package_index`, `tool_result_summaries`,
+`turn_plan_summary`, and `ArchivistTurnPacket` instead of the full graph state.
+
+The fast play profile enables enforced context budgeting. Balanced and theatrical profiles continue
+to use shadow mode until live A/B quality gates promote enforcement. Context approval and clipping
+are programmatic; no additional LLM approval step is introduced. A future context-planner experiment
+may request reference ids, but the system must still apply visibility, budget, and citation checks
+before loading text.
+
+Recent live A/B showed that enforced context with legacy contracts passed the 2-turn smoke, while
+compact contracts and micro-gates caused schema repair fallbacks or first-turn clarification
+regressions on the configured provider. Compact contracts and micro-gates remain explicit eval
+overrides rather than normal `fast` defaults.
 
 ## Model Fallback Policy
 
@@ -77,10 +90,11 @@ preserve advisor contracts, prompt versions, trace metadata, and deterministic t
 ## Play Profiles
 
 `trpg play` exposes `--profile fast|balanced|theatrical` as the normal user-facing runtime choice.
-The default `balanced` profile uses the stable multi-advisor path. `fast` enables compact contracts,
-micro-gates, parallel review, and the fast latency budget. `theatrical` preserves the stable path
-with the theatrical latency budget for future style work. Use `--local` for the no-model structural
-debug fallback.
+The default `balanced` profile uses the stable multi-advisor path and shadow context budgeting.
+`fast` uses the stable multi-advisor path with legacy contracts, parallel review, enforced context
+budgeting, and the fast latency budget. `theatrical` preserves the stable path with shadow context
+budgeting and the theatrical latency budget for future style work. Use `--local` for the no-model
+structural debug fallback.
 
 Online eval accepts the same `--profile` and still exposes explicit experiment flags for A/B
 reproduction. Reports must record both the selected profile and resolved graph flags.
