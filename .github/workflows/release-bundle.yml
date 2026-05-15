@@ -1,0 +1,59 @@
+name: Release Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: Bundle name
+        required: true
+        default: black-tide-beacon
+      ruleset_id:
+        description: Default ruleset package id
+        required: true
+        default: coc7_light_investigation
+      scenario_id:
+        description: Default scenario package id
+        required: true
+        default: black_tide_beacon
+      profile:
+        description: Default play profile
+        required: true
+        default: balanced
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install ".[dev,release]"
+
+      - name: Validate
+        run: |
+          coc content check
+          python -m pytest tests/test_release_bundle.py
+
+      - name: Build bundle
+        run: >
+          coc release build
+          --name "${{ inputs.name }}-${{ runner.os }}"
+          --ruleset-id "${{ inputs.ruleset_id }}"
+          --scenario-id "${{ inputs.scenario_id }}"
+          --profile "${{ inputs.profile }}"
+          --force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.name }}-${{ runner.os }}
+          path: dist/releases/*.zip

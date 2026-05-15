@@ -48,7 +48,7 @@ long-play evaluation, and user-facing play profiles.
 - LLM-facing instruction prompts and framework-generated internal advisor fields must be English.
   Player input, retrieved content, and content-package data may be multilingual; final
   player-facing text must match the player's language.
-- Tests and content packages may contain smoke-test terms. `src/trpg_agent` must not.
+- Tests and content packages may contain smoke-test terms. `src/coc` must not.
 - Offline turn eval must use fake advisor/fixture responses rather than relying on core graph
   keyword guessing.
 - Do not solve latency by weakening resolver, visibility, critic, or durable-state boundaries.
@@ -59,15 +59,15 @@ long-play evaluation, and user-facing play profiles.
   reason in trace/state, and resolver results, scenario patches, hidden-content exposure risk, and
   pending rules opportunities must stay on the full safety path.
 - Before changing context budgets, retrieval, advisor scheduling, or provider settings, inspect
-  `trpg eval observation-report` so optimization work is tied to measured slow nodes, prompt size,
+  `coc eval observation-report` so optimization work is tied to measured slow nodes, prompt size,
   fallback counts, and timeout counts.
 - User-facing play configuration should go through `--profile fast|balanced|theatrical` and
-  `--local`; do not re-expose low-level experiment flags on `trpg play` unless they are promoted to
+  `--local`; do not re-expose low-level experiment flags on `coc play` unless they are promoted to
   documented profile behavior.
 - Eval and development smoke tests must not leave playable test sessions in the default local
   database unless a human explicitly needs to inspect that session. Use `--keep-session` only for
   deliberate retention, and otherwise rely on eval command cleanup or run
-  `.venv/bin/trpg session cleanup-tests --yes` after tests.
+  `.venv/bin/coc session cleanup-tests --yes` after tests.
 
 ## Required Checks
 
@@ -76,12 +76,12 @@ Run these before handing off changes:
 ```bash
 .venv/bin/ruff check .
 .venv/bin/pytest
-.venv/bin/trpg content check
-.venv/bin/trpg eval all --offline
+.venv/bin/coc content check
+.venv/bin/coc eval all --offline
 ```
 
 Use live LLM evaluation when changing prompts, resolver flow, disclosure behavior, or narration:
 
 ```bash
-.venv/bin/trpg eval live --limit 3
+.venv/bin/coc eval live --limit 3
 ```

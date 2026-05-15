@@ -1,5 +1,5 @@
-from trpg_agent.eval.report import build_quality_report
-from trpg_agent.eval.scorecard import EvalFinding, EvalResult, score_from_findings
+from coc.eval.report import build_quality_report
+from coc.eval.scorecard import EvalFinding, EvalResult, score_from_findings
 
 
 def test_quality_report_aggregates_eval_results() -> None:

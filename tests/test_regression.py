@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from trpg_agent.app.config import load_config
-from trpg_agent.eval.regression import run_regression
+from coc.app.config import load_config
+from coc.eval.regression import run_regression
 
 
 def test_regression_smoke(tmp_path: Path) -> None:

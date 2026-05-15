@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from trpg_agent.content.registry import ContentRegistry
-from trpg_agent.graph.build_turn_graph import build_turn_graph
-from trpg_agent.memory.store import SCHEMA_VERSION, SqliteStore
-from trpg_agent.security.redaction import redact_secrets
+from coc.content.registry import ContentRegistry
+from coc.graph.build_turn_graph import build_turn_graph
+from coc.memory.store import SCHEMA_VERSION, SqliteStore
+from coc.security.redaction import redact_secrets
 
 
 def test_store_records_schema_migrations(tmp_path) -> None:

@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-from trpg_agent.graph.build_turn_graph import (
+from coc.graph.build_turn_graph import (
     _micro_gate_context,
     _routing_from_micro_gates,
     apply_world_patch_results,
@@ -18,14 +18,14 @@ from trpg_agent.graph.build_turn_graph import (
     load_runtime_context,
     retrieve_context_parallel,
 )
-from trpg_agent.graph.runtime import (
+from coc.graph.runtime import (
     _runtime_profile,
     checkpoint_path_for,
     durable_turn_graph,
     invoke_turn_graph,
     stream_turn_graph,
 )
-from trpg_agent.memory.store import SqliteStore
+from coc.memory.store import SqliteStore
 
 
 def _routing_response(
@@ -163,7 +163,7 @@ def test_recorded_info_query_does_not_become_entry_clarification() -> None:
 def test_recorded_high_risk_actions_use_resolver_when_advised() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     for player_input in [
         "我要关闭船中的广播",
@@ -510,7 +510,7 @@ def test_micro_gates_adjudication_skips_core_gm_plan_call() -> None:
 def test_conditional_advisors_direct_plan_skips_core_gm_and_llm_review() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -558,7 +558,7 @@ def test_conditional_advisors_direct_plan_skips_core_gm_and_llm_review() -> None
 def test_conditional_advisors_keep_risky_actions_on_full_path() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -602,7 +602,7 @@ def test_conditional_advisors_keep_risky_actions_on_full_path() -> None:
 def test_conditional_surface_selector_skips_full_scenario_director(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -686,7 +686,7 @@ def test_conditional_surface_selector_skips_full_scenario_director(tmp_path) -> 
 def test_conditional_surface_selector_falls_back_on_invalid_surface(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -752,7 +752,7 @@ def test_conditional_surface_selector_falls_back_on_invalid_surface(tmp_path) ->
 def test_conditional_surface_selector_error_uses_safe_surface_recovery(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -823,7 +823,7 @@ def test_conditional_surface_selector_empty_fallback_uses_safe_surface_recovery(
 ) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1074,7 +1074,7 @@ def test_llm_narration_fallback_hides_unavailable_scenario_marker() -> None:
 def test_llm_turn_graph_parses_turn_plan() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1111,7 +1111,7 @@ def test_llm_turn_graph_parses_turn_plan() -> None:
 def test_single_turn_advisor_path_can_request_resolver() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1189,7 +1189,7 @@ def test_single_turn_advisor_path_can_request_resolver() -> None:
 def test_single_turn_advisor_clarification_is_player_facing() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1254,7 +1254,7 @@ def test_single_turn_advisor_clarification_is_player_facing() -> None:
 def test_llm_turn_graph_does_not_override_advisor_route_with_target_keywords() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1308,7 +1308,7 @@ def test_llm_turn_graph_does_not_override_advisor_route_with_target_keywords() -
 def test_rules_resolution_depends_on_advisor_not_target_keyword() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1349,7 +1349,7 @@ def test_rules_resolution_depends_on_advisor_not_target_keyword() -> None:
 def test_high_ambiguity_target_remains_clarification_without_local_default() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1395,7 +1395,7 @@ def test_high_ambiguity_target_remains_clarification_without_local_default() -> 
 def test_rules_advice_clarification_prevents_ambiguous_approach_roll() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1427,7 +1427,7 @@ def test_rules_advice_clarification_prevents_ambiguous_approach_roll() -> None:
 
 
 def test_mechanical_rules_clarification_is_not_asked_to_player() -> None:
-    from trpg_agent.graph.build_turn_graph import _rules_advice_requires_player_clarification
+    from coc.graph.build_turn_graph import _rules_advice_requires_player_clarification
 
     state = {
         "rules_advice": {
@@ -1443,7 +1443,7 @@ def test_mechanical_rules_clarification_is_not_asked_to_player() -> None:
 def test_llm_turn_graph_repairs_malformed_turn_plan() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1482,7 +1482,7 @@ def test_llm_turn_graph_repairs_malformed_turn_plan() -> None:
 def test_llm_risky_action_cannot_bypass_resolver() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1539,7 +1539,7 @@ def test_llm_risky_action_cannot_bypass_resolver() -> None:
 def test_rules_adjudicator_advice_feeds_resolver_request() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1584,7 +1584,7 @@ def test_rules_adjudicator_advice_feeds_resolver_request() -> None:
 def test_turn_graph_can_use_independent_advisor_models() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     intent_model = FakeListChatModel(
         responses=[_routing_response(route="risky_action", needs_rules_resolution=True)]
@@ -1635,7 +1635,7 @@ def test_turn_graph_can_use_independent_advisor_models() -> None:
 def test_intent_advisor_failure_falls_back_safely() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1688,7 +1688,7 @@ def test_intent_advisor_failure_falls_back_safely() -> None:
 def test_rules_advisor_failure_keeps_resolver_path() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1730,7 +1730,7 @@ def test_rules_advisor_failure_keeps_resolver_path() -> None:
 def test_resolver_request_protected_arguments_are_sanitized() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1788,7 +1788,7 @@ def test_resolver_request_protected_arguments_are_sanitized() -> None:
 def test_resolver_request_drops_llm_roll_and_invalid_approach() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1842,7 +1842,7 @@ def test_resolver_request_drops_llm_roll_and_invalid_approach() -> None:
 def test_natural_language_dice_expression_does_not_override_resolver_dice() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1883,7 +1883,7 @@ def test_natural_language_dice_expression_does_not_override_resolver_dice() -> N
 def test_llm_roll_dice_request_cannot_override_resolver_dice() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -1939,7 +1939,7 @@ def test_llm_roll_dice_request_cannot_override_resolver_dice() -> None:
 def test_failed_required_resolution_blocks_llm_narration() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_narration_node
+    from coc.graph.build_turn_graph import build_llm_narration_node
 
     node = build_llm_narration_node(FakeListChatModel(responses=[]))
     result = node(
@@ -1967,7 +1967,7 @@ def test_failed_required_resolution_blocks_llm_narration() -> None:
 def test_narration_appends_missing_resolver_dice_result() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_narration_node
+    from coc.graph.build_turn_graph import build_llm_narration_node
 
     node = build_llm_narration_node(
         FakeListChatModel(
@@ -2031,7 +2031,7 @@ def test_compact_narration_contract_accepts_text_only_output() -> None:
 def test_intent_arbiter_allows_question_without_keyword_fallback() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -2093,7 +2093,7 @@ def test_turn_graph_executes_ruleset_resolver() -> None:
 def test_resolver_result_does_not_transition_scene_from_compiled_scenario() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     model = FakeListChatModel(
         responses=[
@@ -2202,7 +2202,7 @@ def test_turn_graph_replays_existing_turn_without_reapplying_world_patches(tmp_p
 
 
 def test_world_patch_application_is_idempotent_after_partial_replay(tmp_path) -> None:
-    from trpg_agent.graph.build_turn_graph import apply_world_patch_results
+    from coc.graph.build_turn_graph import apply_world_patch_results
 
     sqlite_path = tmp_path / "turn.sqlite"
     state = {
@@ -2321,7 +2321,7 @@ def test_durable_turn_graph_handles_30_turn_session_without_duplicate_state(tmp_
 def test_llm_scenario_director_validates_and_applies_package_patches(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+    from coc.graph.build_turn_graph import build_turn_graph_with_model
 
     sqlite_path = tmp_path / "scenario.sqlite"
     model = FakeListChatModel(
@@ -2565,7 +2565,7 @@ def test_scenario_director_accepts_typed_clue_patch_alias(tmp_path) -> None:
 def test_critic_repair_cannot_change_tool_results_or_world_state(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -2617,7 +2617,7 @@ def test_critic_repair_cannot_change_tool_results_or_world_state(tmp_path) -> No
 def test_critic_low_quality_findings_are_advisory_not_failed(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -2671,7 +2671,7 @@ def test_critic_low_quality_findings_are_advisory_not_failed(tmp_path) -> None:
 def test_critic_medium_unsupported_fact_is_actionable(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -2721,7 +2721,7 @@ def test_critic_medium_unsupported_fact_is_actionable(tmp_path) -> None:
 def test_critic_unsupported_fact_forces_repair_before_memory_write(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import (
+    from coc.graph.build_turn_graph import (
         build_llm_critic_guardrail_node,
         persist_memory_curation,
     )
@@ -2792,7 +2792,7 @@ def test_critic_unsupported_fact_forces_repair_before_memory_write(tmp_path) -> 
 def test_critic_player_agency_finding_uses_deterministic_fallback(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -2838,7 +2838,7 @@ def test_critic_player_agency_finding_uses_deterministic_fallback(tmp_path) -> N
 def test_critic_detects_player_agency_language_even_when_model_misses_it(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -2877,7 +2877,7 @@ def test_critic_detects_player_agency_language_even_when_model_misses_it(tmp_pat
 def test_critic_fallback_preserves_visible_scene_context(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -2925,7 +2925,7 @@ def test_critic_fallback_preserves_visible_scene_context(tmp_path) -> None:
 def test_critic_fallback_dedupes_semantically_repeated_visible_context(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -2987,7 +2987,7 @@ def test_critic_fallback_dedupes_semantically_repeated_visible_context(tmp_path)
 def test_critic_does_not_special_case_assumed_target_marker(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -3049,7 +3049,7 @@ def test_critic_does_not_special_case_assumed_target_marker(tmp_path) -> None:
 def test_critic_clarification_finding_forces_question(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -3096,7 +3096,7 @@ def test_critic_clarification_finding_forces_question(tmp_path) -> None:
 def test_critic_clarification_does_not_hide_validated_scenario_progress(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import build_llm_critic_guardrail_node
+    from coc.graph.build_turn_graph import build_llm_critic_guardrail_node
 
     node = build_llm_critic_guardrail_node(
         FakeListChatModel(
@@ -3171,7 +3171,7 @@ def test_critic_clarification_does_not_hide_validated_scenario_progress(tmp_path
 def test_memory_curator_persists_visible_and_gm_only_memory(tmp_path) -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from trpg_agent.graph.build_turn_graph import (
+    from coc.graph.build_turn_graph import (
         build_llm_memory_curator_node,
         persist_memory_curation,
     )
@@ -3239,7 +3239,7 @@ def test_memory_curator_persists_visible_and_gm_only_memory(tmp_path) -> None:
 
 
 def test_memory_curation_with_contradictions_skips_curated_writes(tmp_path) -> None:
-    from trpg_agent.graph.build_turn_graph import persist_memory_curation
+    from coc.graph.build_turn_graph import persist_memory_curation
 
     sqlite_path = tmp_path / "memory-contradiction.sqlite"
     state = {
@@ -3277,7 +3277,7 @@ def test_memory_curation_with_contradictions_skips_curated_writes(tmp_path) -> N
 
 
 def test_memory_curation_filters_only_conflicting_candidates(tmp_path) -> None:
-    from trpg_agent.graph.build_turn_graph import persist_memory_curation
+    from coc.graph.build_turn_graph import persist_memory_curation
 
     sqlite_path = tmp_path / "memory-partial-contradiction.sqlite"
     state = {

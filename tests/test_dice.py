@@ -1,4 +1,4 @@
-from trpg_agent.tools.dice import parse_expression, roll_dice_once
+from coc.tools.dice import parse_expression, roll_dice_once
 
 
 def test_dice_roll_is_replayable() -> None:

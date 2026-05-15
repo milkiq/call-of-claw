@@ -32,10 +32,10 @@ Advisor trace metadata includes:
 These metrics are coarse and provider-independent. They are intended for trend analysis and
 debugging, not billing-grade accounting.
 
-`trpg eval advisor-metrics` summarizes these diagnostics per session and can compare a legacy
+`coc eval advisor-metrics` summarizes these diagnostics per session and can compare a legacy
 session with a compact-contract session.
 
-`trpg eval observation-report` summarizes report files and persisted advisor runs. It highlights
+`coc eval observation-report` summarizes report files and persisted advisor runs. It highlights
 runtime-profile coverage, slowest runtime nodes, advisor fallback/timeout counts, prompt-size
 breakdowns, and missing retrieval diagnostics. Use it before changing context budgets, retrieval,
 advisor scheduling, or provider settings.
@@ -90,7 +90,7 @@ preserve advisor contracts, prompt versions, trace metadata, and deterministic t
 
 ## Play Profiles
 
-`trpg play` exposes `--profile fast|balanced|theatrical` as the normal user-facing runtime choice.
+`coc play` exposes `--profile fast|balanced|theatrical` as the normal user-facing runtime choice.
 The default `balanced` profile uses the stable multi-advisor path and shadow context budgeting.
 `fast` uses the stable multi-advisor path with conditional low-risk advisor skips, legacy contracts,
 parallel review, enforced context budgeting, and the fast latency budget. The conditional fast path
@@ -111,6 +111,6 @@ reproduction. Reports must record both the selected profile and resolved graph f
 
 ## Release Gates
 
-`trpg eval release-gates` runs content validation, offline eval, durable replay coverage, and
+`coc eval release-gates` runs content validation, offline eval, durable replay coverage, and
 long-play reliability. Live quality gates remain separate because they require a configured model and
 network access.

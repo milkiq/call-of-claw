@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from trpg_agent.langchain.models import infer_provider, load_model_config
+from coc.langchain.models import infer_provider, load_model_config
 
 
 def test_infer_provider() -> None:

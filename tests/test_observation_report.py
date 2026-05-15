@@ -1,7 +1,7 @@
 import json
 
-from trpg_agent.eval.observation_report import build_observation_report
-from trpg_agent.memory.store import SqliteStore
+from coc.eval.observation_report import build_observation_report
+from coc.memory.store import SqliteStore
 
 
 def test_observation_report_reads_old_and_new_online_reports(tmp_path) -> None:

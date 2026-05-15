@@ -47,7 +47,7 @@ Current status: mostly implemented.
 Implementation work:
 
 - Maintain architecture red lines in `AGENTS.md` and `docs/architecture-red-lines.md`.
-- Keep concrete smoke-test rules and scenario terms out of `src/trpg_agent`.
+- Keep concrete smoke-test rules and scenario terms out of `src/coc`.
 - Keep current CLI play, deterministic eval, content check, and architecture guardrail tests working.
 - Treat the current keyword-based intent and risk detection as bootstrap fallback only.
 
@@ -56,8 +56,8 @@ Verification:
 ```bash
 .venv/bin/ruff check .
 .venv/bin/pytest
-.venv/bin/trpg content check
-.venv/bin/trpg eval all --offline
+.venv/bin/coc content check
+.venv/bin/coc eval all --offline
 ```
 
 Acceptance:
@@ -408,9 +408,9 @@ Goal: Make quality improvement continuous instead of anecdotal.
 Current status: implemented as the current automated quality baseline. Offline eval includes
 Milestone 5-9 trace coverage, content validation, replay, and package checks. LLM judge scorecards
 now include generic architecture compliance. Eval run metadata records graph version and content
-package versions, and `trpg eval quality-report` summarizes pass/fail, average scorecards, findings,
+package versions, and `coc eval quality-report` summarizes pass/fail, average scorecards, findings,
 and score movement across selected runs. Roadmap derivation continues to consume persisted eval
-findings. The current required check baseline passes `ruff`, `pytest`, `trpg content check`, and
+findings. The current required check baseline passes `ruff`, `pytest`, `coc content check`, and
 offline eval; the latest bounded live eval passed 2/2 after fixing the scenario patch normalization
 boundary, and the latest quality report passed 30/30 selected cases.
 
@@ -437,7 +437,7 @@ Implementation work:
   - generic architecture compliance.
 - Add paired comparison against previous prompt/runtime versions.
 - Store eval runs with graph version, prompt versions, model config, package ids, and trace ids.
-- Add `trpg eval quality-report` that summarizes trends, failures, and next roadmap items.
+- Add `coc eval quality-report` that summarizes trends, failures, and next roadmap items.
 
 Verification:
 
@@ -455,7 +455,7 @@ Acceptance:
 
 Goal: Prove that the agent can host a long single-player session without state drift.
 
-Current status: implemented as a deterministic long-play reliability baseline. `trpg eval long-play`
+Current status: implemented as a deterministic long-play reliability baseline. `coc eval long-play`
 drives the durable graph through a scripted multi-turn session, replays a persisted turn, and records
 turn count, canon count, memory count, world patch applications, critic reports, resolver bypasses,
 critical critic findings, player-agency markers, duplicate ids, and trace-node coverage. The
@@ -536,13 +536,13 @@ Acceptance:
 
 Goal: Reach a practical solo play experience that is reliable enough for regular use.
 
-Current status: implemented as a local CLI MVP. `trpg session start` initializes scenario state,
-`trpg play --input` runs one deterministic or LLM-backed turn, and `trpg play` without `--input`
+Current status: implemented as a local CLI MVP. `coc session start` initializes scenario state,
+`coc play --input` runs one deterministic or LLM-backed turn, and `coc play` without `--input`
 starts a reusable interactive loop with `/recap`, `/session`, `/quit`, generated session ids, resume
-commands, and ruleset-provided character creation before the first turn. `trpg session recap`
-summarizes recent turns and public state, `trpg session inspect` exposes public state by default and
-GM trace data only with `--gm-trace`, `trpg session export` writes transcript/state JSON, and
-`trpg session quality-report` summarizes persisted session metrics. Tests exercise both the
+commands, and ruleset-provided character creation before the first turn. `coc session recap`
+summarizes recent turns and public state, `coc session inspect` exposes public state by default and
+GM trace data only with `--gm-trace`, `coc session export` writes transcript/state JSON, and
+`coc session quality-report` summarizes persisted session metrics. Tests exercise both the
 start-play-recap-inspect-export-quality path and the interactive create/resume character path.
 
 Implementation work:
@@ -581,7 +581,7 @@ Goal: Make the system maintainable for ongoing development by Codex or other age
 Current status: implemented as a maintainability baseline. SQLite migrations are recorded in a
 `schema_migrations` table, persisted traces are redacted for common API-key and bearer-token shapes,
 advisor traces include latency and estimated prompt/response character counts, content validation
-checks semver package versions and compiled package compatibility, and `trpg eval release-gates`
+checks semver package versions and compiled package compatibility, and `coc eval release-gates`
 runs content validation, offline eval, durable replay, and long-play reliability. Prompt and
 developer workflow docs were added for future agents.
 
@@ -640,7 +640,7 @@ Current status: baseline implemented. Advisor diagnostics record elapsed time an
 and response size. `invoke_turn_graph()` and `stream_turn_graph()` now attach a `runtime_profile`
 with per-node wall-clock timings, the selected latency budget profile, slowest nodes, and
 trace-derived fallback/timeout counts, and coarse latency categories. Online play reports include
-runtime metadata and flag timeout or fallback markers as infrastructure findings. `trpg eval
+runtime metadata and flag timeout or fallback markers as infrastructure findings. `coc eval
 observation-report` can summarize historical report files and stored advisor runs, including older
 reports that predate `runtime_profile`. Remaining work is finer provider-level attribution where a
 backend exposes cache/read/write timings.
@@ -1009,14 +1009,14 @@ Acceptance:
 
 Goal: Make the default CLI playable without requiring the user to understand experimental flags.
 
-Current status: baseline implemented. `trpg play` now exposes `--profile
+Current status: baseline implemented. `coc play` now exposes `--profile
 fast|balanced|theatrical` plus `--local`, progress, JSON, session, ruleset, and scenario options.
-The old experiment switches are hidden from normal play help. `trpg eval online-playtest` also
+The old experiment switches are hidden from normal play help. `coc eval online-playtest` also
 accepts `--profile` while keeping explicit experiment flags for A/B reproduction.
 
 Implementation work:
 
-- Add `--profile fast|balanced|theatrical` to `trpg play` and online eval.
+- Add `--profile fast|balanced|theatrical` to `coc play` and online eval.
   - Done.
 - Define profile defaults:
   - `fast`: stable multi-advisor path, conditional low-risk advisor skips, legacy contracts,

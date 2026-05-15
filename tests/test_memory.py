@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from trpg_agent.memory.canon import import_canon_jsonl
-from trpg_agent.memory.store import SqliteStore
+from coc.memory.canon import import_canon_jsonl
+from coc.memory.store import SqliteStore
 
 
 def test_canon_import_is_idempotent(tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-from trpg_agent.eval.judge import JudgeReport, run_llm_judge, run_static_quality_gate
-from trpg_agent.eval.scorecard import EvalFinding, EvalScorecard
+from coc.eval.judge import JudgeReport, run_llm_judge, run_static_quality_gate
+from coc.eval.scorecard import EvalFinding, EvalScorecard
 
 
 def test_static_quality_gate_finds_empty_output() -> None:

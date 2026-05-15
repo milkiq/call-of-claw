@@ -1,4 +1,4 @@
-# TRPG Agent
+# Call of Claw
 
 Generic TRPG GM agent runtime built around LangChain, LangGraph, LangSmith, Pydantic, and SQLite.
 
@@ -11,10 +11,10 @@ scenario-specific GM requirements are loaded through content packages and compil
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
-trpg content check
-trpg eval regression
-trpg eval all --offline
-trpg eval report
+coc content check
+coc eval regression
+coc eval all --offline
+coc eval report
 pytest
 ```
 
@@ -55,22 +55,41 @@ Implemented runtime pieces:
 Live LLM checks use `llm.config.json`:
 
 ```bash
-trpg session start --session-id demo --reset
-trpg play --use-llm --input '我检查门口'
-trpg play --use-llm --session-id demo --input '我尝试强行修理导航'
-trpg eval live --limit 3
-trpg eval all
+coc session start --session-id demo --reset
+coc play --use-llm --input '我检查门口'
+coc play --use-llm --session-id demo --input '我尝试强行修理导航'
+coc eval live --limit 3
+coc eval all
 ```
 
 Interactive play:
 
 ```bash
-trpg play --session-id demo
-trpg play --local --session-id local-demo
-trpg play --session-id demo --single-turn-advisor --parallel-review --no-progress
+coc play --session-id demo
+coc play --local --session-id local-demo
+coc play --session-id demo --single-turn-advisor --parallel-review --no-progress
 ```
 
-When `--input` is omitted, `trpg play` starts a reusable loop. A new session asks the loaded
+When `--input` is omitted, `coc play` starts a reusable loop. A new session asks the loaded
 ruleset's compiled character-creation questions, then accepts player actions until `/quit`. Exiting
 prints the session id and resume command. In an interactive terminal the input line uses
 `prompt_toolkit` editing and shows safe progress stages while the GM graph is working.
+
+## Release Bundle
+
+Build a shareable macOS or Windows folder bundle from the current platform:
+
+```bash
+pip install -e '.[release]'
+coc release build \
+  --name black-tide-beacon \
+  --ruleset-id coc7_light_investigation \
+  --scenario-id black_tide_beacon \
+  --profile balanced
+```
+
+The bundle is written under `dist/releases/` and contains the `coc` executable, active content
+packages, `release.json`, `README-PLAY.md`, `data/`, and `llm.config.example.json`. It does not
+include local sessions, eval data, or real API configs. The recipient copies
+`llm.config.example.json` to `llm.config.json`, fills their own provider settings, runs
+`coc doctor`, then runs `coc play`.

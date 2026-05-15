@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from trpg_agent.app.config import load_config
-from trpg_agent.eval.cases import load_eval_cases
-from trpg_agent.eval.runner import run_eval_cases
+from coc.app.config import load_config
+from coc.eval.cases import load_eval_cases
+from coc.eval.runner import run_eval_cases
 
 
 def test_load_eval_cases() -> None:

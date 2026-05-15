@@ -2,9 +2,9 @@ import re
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-from trpg_agent.langchain.advisors import ADVISOR_SPECS, invoke_advisor
-from trpg_agent.langchain.prompts import validate_runtime_prompts_are_generic
-from trpg_agent.langchain.structured import (
+from coc.langchain.advisors import ADVISOR_SPECS, invoke_advisor
+from coc.langchain.prompts import validate_runtime_prompts_are_generic
+from coc.langchain.structured import (
     AuthorityGateResult,
     AuthorityMicroGateDecision,
     CriticReport,

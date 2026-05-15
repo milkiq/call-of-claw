@@ -3,9 +3,9 @@ import sqlite3
 
 from typer.testing import CliRunner
 
-from trpg_agent.app.cli import app
-from trpg_agent.graph.runtime import checkpoint_path_for
-from trpg_agent.memory.store import SqliteStore
+from coc.app.cli import app
+from coc.graph.runtime import checkpoint_path_for
+from coc.memory.store import SqliteStore
 
 
 def _insert_checkpoint_rows(sqlite_path, thread_ids: list[str]) -> None:
@@ -66,7 +66,7 @@ def _checkpoint_thread_ids(sqlite_path) -> list[str]:
 
 def test_session_cli_start_play_recap_inspect_and_export(tmp_path) -> None:
     runner = CliRunner()
-    env = {"TRPG_AGENT_SQLITE": str(tmp_path / "cli.sqlite")}
+    env = {"COC_SQLITE": str(tmp_path / "cli.sqlite")}
 
     start = runner.invoke(
         app,
@@ -177,7 +177,7 @@ def test_session_cli_start_play_recap_inspect_and_export(tmp_path) -> None:
 
 def test_play_cli_non_json_output_distinguishes_gm_and_manual_roll(tmp_path) -> None:
     runner = CliRunner()
-    env = {"TRPG_AGENT_SQLITE": str(tmp_path / "play-style.sqlite")}
+    env = {"COC_SQLITE": str(tmp_path / "play-style.sqlite")}
 
     gm_turn = runner.invoke(
         app,
@@ -223,7 +223,7 @@ def test_play_cli_non_json_output_distinguishes_gm_and_manual_roll(tmp_path) -> 
 
 def test_eval_observation_report_cli_outputs_json(tmp_path) -> None:
     runner = CliRunner()
-    env = {"TRPG_AGENT_SQLITE": str(tmp_path / "observation.sqlite")}
+    env = {"COC_SQLITE": str(tmp_path / "observation.sqlite")}
 
     result = runner.invoke(
         app,
@@ -239,7 +239,7 @@ def test_eval_observation_report_cli_outputs_json(tmp_path) -> None:
 
 def test_session_cli_list_includes_counts_and_json(tmp_path) -> None:
     runner = CliRunner()
-    env = {"TRPG_AGENT_SQLITE": str(tmp_path / "session-list.sqlite")}
+    env = {"COC_SQLITE": str(tmp_path / "session-list.sqlite")}
     start = runner.invoke(
         app,
         [
@@ -274,7 +274,7 @@ def test_session_cli_list_includes_counts_and_json(tmp_path) -> None:
 def test_session_cli_delete_single_session_preserves_eval_runs(tmp_path) -> None:
     runner = CliRunner()
     sqlite_path = tmp_path / "session-delete.sqlite"
-    env = {"TRPG_AGENT_SQLITE": str(sqlite_path)}
+    env = {"COC_SQLITE": str(sqlite_path)}
     for session_id in ["delete-me", "keep-me"]:
         result = runner.invoke(
             app,
@@ -378,7 +378,7 @@ def test_session_cli_delete_single_session_preserves_eval_runs(tmp_path) -> None
 def test_session_cli_delete_all_sessions_preserves_eval_runs(tmp_path) -> None:
     runner = CliRunner()
     sqlite_path = tmp_path / "session-delete-all.sqlite"
-    env = {"TRPG_AGENT_SQLITE": str(sqlite_path)}
+    env = {"COC_SQLITE": str(sqlite_path)}
     for session_id in ["one", "two"]:
         result = runner.invoke(
             app,
@@ -424,7 +424,7 @@ def test_session_cli_delete_all_sessions_preserves_eval_runs(tmp_path) -> None:
 def test_session_cli_cleanup_tests_deletes_known_test_sessions(tmp_path) -> None:
     runner = CliRunner()
     sqlite_path = tmp_path / "session-cleanup-tests.sqlite"
-    env = {"TRPG_AGENT_SQLITE": str(sqlite_path)}
+    env = {"COC_SQLITE": str(sqlite_path)}
     store = SqliteStore(sqlite_path)
     store.migrate()
     for session_id in [
@@ -474,7 +474,7 @@ def test_eval_long_play_cli(tmp_path) -> None:
     result = runner.invoke(
         app,
         ["eval", "long-play", "--turns", "6", "--session-id", "cli-long-play"],
-        env={"TRPG_AGENT_SQLITE": str(tmp_path / "long-play.sqlite")},
+        env={"COC_SQLITE": str(tmp_path / "long-play.sqlite")},
     )
 
     assert result.exit_code == 0
@@ -486,7 +486,7 @@ def test_eval_release_gates_cli(tmp_path) -> None:
     result = runner.invoke(
         app,
         ["eval", "release-gates", "--long-play-turns", "6"],
-        env={"TRPG_AGENT_SQLITE": str(tmp_path / "release.sqlite")},
+        env={"COC_SQLITE": str(tmp_path / "release.sqlite")},
     )
 
     assert result.exit_code == 0
@@ -496,7 +496,7 @@ def test_eval_release_gates_cli(tmp_path) -> None:
 def test_eval_advisor_metrics_cli_summarizes_and_compares(tmp_path) -> None:
     runner = CliRunner()
     sqlite_path = tmp_path / "metrics.sqlite"
-    env = {"TRPG_AGENT_SQLITE": str(sqlite_path)}
+    env = {"COC_SQLITE": str(sqlite_path)}
     store = SqliteStore(sqlite_path)
     store.migrate()
     for session_id, response_chars in [("legacy", 1000), ("compact", 500)]:
@@ -572,7 +572,7 @@ def test_play_help_lists_profile_and_hides_experiment_flags() -> None:
 
 
 def test_play_profile_resolver_sets_expected_flags() -> None:
-    from trpg_agent.app.cli import _resolve_play_profile
+    from coc.app.cli import _resolve_play_profile
 
     fast = _resolve_play_profile("fast")
     assert fast.use_llm is True
@@ -624,12 +624,12 @@ def test_interactive_play_creates_character_and_prints_resume(tmp_path) -> None:
             "crystal_stop_singing_smoke",
         ],
         input="阿岚\n冷静的导航员\n5\n救回船长\n她\n/quit\n",
-        env={"TRPG_AGENT_SQLITE": str(sqlite_path)},
+        env={"COC_SQLITE": str(sqlite_path)},
     )
 
     assert result.exit_code == 0
     assert "session-id: interactive-cli" in result.output
-    assert "resume: trpg play --session-id interactive-cli" in result.output
+    assert "resume: coc play --session-id interactive-cli" in result.output
     store = SqliteStore(sqlite_path)
     state = store.get_session_state("interactive-cli")
     character_context = state["character_context"]
@@ -641,7 +641,7 @@ def test_interactive_play_creates_character_and_prints_resume(tmp_path) -> None:
 def test_interactive_play_resumes_existing_character(tmp_path) -> None:
     runner = CliRunner()
     sqlite_path = tmp_path / "interactive-resume.sqlite"
-    env = {"TRPG_AGENT_SQLITE": str(sqlite_path)}
+    env = {"COC_SQLITE": str(sqlite_path)}
     first = runner.invoke(
         app,
         [
@@ -674,7 +674,7 @@ def test_interactive_play_resumes_existing_character(tmp_path) -> None:
 def test_interactive_play_adds_character_to_existing_turn_session(tmp_path) -> None:
     runner = CliRunner()
     sqlite_path = tmp_path / "existing-turn.sqlite"
-    env = {"TRPG_AGENT_SQLITE": str(sqlite_path)}
+    env = {"COC_SQLITE": str(sqlite_path)}
     one_turn = runner.invoke(
         app,
         [

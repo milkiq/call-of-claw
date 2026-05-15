@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from trpg_agent.content.compiled import load_compiled_scenario
-from trpg_agent.content.packages import PackageKind
-from trpg_agent.content.registry import ContentRegistry
-from trpg_agent.content.retrieval import search_registry_text, search_registry_text_indexed
-from trpg_agent.content.visibility import AccessMode
+from coc.content.compiled import load_compiled_scenario
+from coc.content.packages import PackageKind
+from coc.content.registry import ContentRegistry
+from coc.content.retrieval import search_registry_text, search_registry_text_indexed
+from coc.content.visibility import AccessMode
 
 
 def test_content_registry_loads_smoke_packages() -> None:

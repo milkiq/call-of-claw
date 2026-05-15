@@ -1,7 +1,7 @@
 [project]
-name = "trpg-agent"
+name = "coc"
 version = "0.1.0"
-description = "A generic LangChain/LangGraph TRPG GM agent runtime."
+description = "Call of Claw, a generic LangChain/LangGraph TRPG GM runtime."
 requires-python = ">=3.12"
 dependencies = [
   "langchain>=1.0.0",
@@ -20,9 +20,12 @@ dev = [
   "pytest>=8.3.0",
   "ruff>=0.8.0",
 ]
+release = [
+  "pyinstaller>=6.11.0",
+]
 
 [project.scripts]
-trpg = "trpg_agent.app.cli:main"
+coc = "coc.app.cli:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]

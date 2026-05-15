@@ -10,7 +10,7 @@ compiled package.
 ## Red Lines
 
 - No concrete ruleset terms, scenario entities, NPCs, clues, locations, or smoke-test keywords in
-  `src/trpg_agent`.
+  `src/coc`.
 - No natural-language keyword routing in the online graph. Intent, risk, target ambiguity, memory
   recall, passive action, and boundary claims must come from structured advisor outputs, not
   substring checks over player input.
@@ -53,7 +53,7 @@ compiled package.
 - Fixed: compiled ruleset schema no longer constrains target numbers to the smoke ruleset range or
   defaults to one dice shape.
 - Added: `tests/test_architecture_guardrails.py` fails if smoke rules or scenario terms enter
-  `src/trpg_agent`.
+  `src/coc`.
 - Added: `tests/test_architecture_guardrails.py` fails if online graph keyword-routing helper names
   or soft target-assumption fields return to `build_turn_graph.py`.
 - Fixed: online routing, micro-gate aggregation, and resolver enforcement no longer use local

@@ -1,4 +1,4 @@
-from trpg_agent.context_budget import build_advisor_context
+from coc.context_budget import build_advisor_context
 
 
 def _state() -> dict:

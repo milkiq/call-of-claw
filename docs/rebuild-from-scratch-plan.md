@@ -1,4 +1,4 @@
-# 通用 TRPG Agent 从零重建计划
+# 通用 Call of Claw 从零重建计划
 
 ## 1. Summary
 
@@ -39,14 +39,14 @@ Lasers & Feelings 和《水晶别唱了》只作为最小 smoke test content pac
 新项目结构建议：
 
 ```text
-coc-agent/
+coc/
   pyproject.toml
   README.md
   docs/
     rebuild-from-scratch-plan.md
     architecture.md
     quality-system.md
-  src/trpg_agent/
+  src/coc/
     app/
       cli.py
       config.py
@@ -443,12 +443,12 @@ Long-term memory 分为：
 
 CLI：
 
-- `trpg content check`
-- `trpg compile ruleset`
-- `trpg compile scenario`
-- `trpg play`
-- `trpg eval regression`
-- `trpg eval playtest`
+- `coc content check`
+- `coc compile ruleset`
+- `coc compile scenario`
+- `coc play`
+- `coc eval regression`
+- `coc eval playtest`
 
 ### Phase 2: LangChain Foundation
 
@@ -583,10 +583,10 @@ Smoke test content：
 
 - 删除旧 demo 后，系统可从 `content/` 和 `seeds/` 重建。
 - 核心 GM prompt 搜索不到任何测试规则或测试剧本专名。
-- `trpg content check` 通过。
-- `trpg compile ruleset` 和 `trpg compile scenario` 可生成 extensions。
-- `trpg play` 可运行任意绑定 ruleset/scenario 的 session。
-- `trpg eval regression` 通过第一批测试。
+- `coc content check` 通过。
+- `coc compile ruleset` 和 `coc compile scenario` 可生成 extensions。
+- `coc play` 可运行任意绑定 ruleset/scenario 的 session。
+- `coc eval regression` 通过第一批测试。
 - LangSmith 中能看到每个 turn 的完整 trace、tool call、retrieved span 和 structured decision。
 - 每个状态变化都能追溯到 deterministic tool 和 canon event。
 - checkpoint replay 不重复掷骰、不重复写事件。

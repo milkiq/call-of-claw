@@ -21,7 +21,7 @@ SMOKE_CONTENT_TERMS = [
 
 
 def test_core_source_does_not_embed_smoke_rules_or_scenario_terms() -> None:
-    src_root = Path.cwd() / "src" / "trpg_agent"
+    src_root = Path.cwd() / "src" / "coc"
     offenders: list[str] = []
     for path in sorted(src_root.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
@@ -33,7 +33,7 @@ def test_core_source_does_not_embed_smoke_rules_or_scenario_terms() -> None:
 
 
 def test_online_graph_has_no_natural_language_keyword_routing_helpers() -> None:
-    source = (Path.cwd() / "src" / "trpg_agent" / "graph" / "build_turn_graph.py").read_text(
+    source = (Path.cwd() / "src" / "coc" / "graph" / "build_turn_graph.py").read_text(
         encoding="utf-8"
     )
     banned_fragments = [
@@ -50,7 +50,7 @@ def test_online_graph_has_no_natural_language_keyword_routing_helpers() -> None:
 
 
 def test_core_source_has_no_legacy_resolver_or_transition_fallbacks() -> None:
-    src_root = Path.cwd() / "src" / "trpg_agent"
+    src_root = Path.cwd() / "src" / "coc"
     banned_fragments = [
         "default_resolver_registry",
         "ResolverRegistry",

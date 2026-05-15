@@ -2,9 +2,9 @@ from pathlib import Path
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-from trpg_agent.app.config import load_config
-from trpg_agent.eval.live import run_live_eval
-from trpg_agent.memory.store import SqliteStore
+from coc.app.config import load_config
+from coc.eval.live import run_live_eval
+from coc.memory.store import SqliteStore
 
 
 def test_live_eval_runs_with_fake_model(tmp_path: Path) -> None:

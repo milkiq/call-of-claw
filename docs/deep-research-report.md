@@ -1,4 +1,4 @@
-# call-of-claw 单机 TRPG Agent 架构演进报告
+# call-of-claw 单机 Call of Claw 架构演进报告
 
 ## 执行摘要
 

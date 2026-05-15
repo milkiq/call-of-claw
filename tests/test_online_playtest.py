@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from trpg_agent.eval.online_playtest import (
+from coc.eval.online_playtest import (
     _offers_pending_question_opportunity,
     _online_findings_from_metrics,
     _online_findings_from_runtime,
@@ -14,7 +14,7 @@ from trpg_agent.eval.online_playtest import (
     _sample_transcript,
     _transcript_markdown,
 )
-from trpg_agent.eval.scorecard import EvalResult, EvalScorecard
+from coc.eval.scorecard import EvalResult, EvalScorecard
 
 
 def test_sample_transcript_keeps_opening_periodic_and_ending_turns() -> None:

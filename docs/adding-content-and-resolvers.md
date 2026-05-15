@@ -54,7 +54,7 @@ rules plugin.
 
 - `.venv/bin/ruff check .`
 - `.venv/bin/pytest`
-- `.venv/bin/trpg content check`
-- `.venv/bin/trpg eval all --offline`
-- `.venv/bin/trpg eval release-gates`
+- `.venv/bin/coc content check`
+- `.venv/bin/coc eval all --offline`
+- `.venv/bin/coc eval release-gates`
 - Bounded live eval when prompts, routing, memory, disclosure, narration, or critic behavior changes.

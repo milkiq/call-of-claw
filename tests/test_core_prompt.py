@@ -1,10 +1,10 @@
 import re
 
-from trpg_agent.app.cli import CHARACTER_CREATION_EXTRACTION_PROMPT
-from trpg_agent.eval.judge import JUDGE_PROMPT
-from trpg_agent.eval.online_playtest import PLAYER_SIMULATOR_PROMPT
-from trpg_agent.langchain import prompts as runtime_prompts
-from trpg_agent.langchain.prompts import RUNTIME_SYSTEM_PROMPTS, validate_core_prompt_is_generic
+from coc.app.cli import CHARACTER_CREATION_EXTRACTION_PROMPT
+from coc.eval.judge import JUDGE_PROMPT
+from coc.eval.online_playtest import PLAYER_SIMULATOR_PROMPT
+from coc.langchain import prompts as runtime_prompts
+from coc.langchain.prompts import RUNTIME_SYSTEM_PROMPTS, validate_core_prompt_is_generic
 
 
 def test_core_prompt_has_no_smoke_content_terms() -> None:

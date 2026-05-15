@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-from trpg_agent.content.compiler import compile_content_draft, write_content_draft
-from trpg_agent.content.registry import ContentRegistry
-from trpg_agent.rules.plugin_runtime import load_rules_plugin
+from coc.content.compiler import compile_content_draft, write_content_draft
+from coc.content.registry import ContentRegistry
+from coc.rules.plugin_runtime import load_rules_plugin
 
 
 def test_content_compiler_writes_valid_ruleset_package(tmp_path: Path) -> None:

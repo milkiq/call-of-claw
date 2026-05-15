@@ -1,0 +1,8 @@
+{
+  "provider": "openai-compatible",
+  "apiKey": "YOUR_API_KEY",
+  "baseURL": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "temperature": 0,
+  "timeoutSeconds": 90
+}

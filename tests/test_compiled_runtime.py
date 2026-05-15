@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from trpg_agent.content.compiled import load_compiled_ruleset, load_compiled_scenario
-from trpg_agent.content.registry import ContentRegistry
-from trpg_agent.memory.store import SqliteStore
-from trpg_agent.rules.compiled_resolver import run_ruleset_resolver
-from trpg_agent.rules.plugin_runtime import load_rules_plugin
-from trpg_agent.scenario.runtime import start_session, sync_scene_details
+from coc.content.compiled import load_compiled_ruleset, load_compiled_scenario
+from coc.content.registry import ContentRegistry
+from coc.memory.store import SqliteStore
+from coc.rules.compiled_resolver import run_ruleset_resolver
+from coc.rules.plugin_runtime import load_rules_plugin
+from coc.scenario.runtime import start_session, sync_scene_details
 
 
 def test_compiled_packages_load() -> None:

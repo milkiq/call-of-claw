@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from trpg_agent.app.config import AppConfig
-from trpg_agent.eval.playtest import (
+from coc.app.config import AppConfig
+from coc.eval.playtest import (
     PlaytestMetrics,
     _findings_from_metrics,
     build_session_quality_summary,
     run_scripted_long_play,
 )
-from trpg_agent.memory.store import SqliteStore
+from coc.memory.store import SqliteStore
 
 
 def _config(tmp_path):

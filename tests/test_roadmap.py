@@ -1,5 +1,5 @@
-from trpg_agent.eval.roadmap import derive_roadmap_from_results
-from trpg_agent.eval.scorecard import EvalFinding, EvalResult
+from coc.eval.roadmap import derive_roadmap_from_results
+from coc.eval.scorecard import EvalFinding, EvalResult
 
 
 def test_roadmap_derives_items_from_findings() -> None:
