@@ -18,11 +18,6 @@ references:
     path: ../../../seeds/scenario.md
     visibility: gm_only
     tags: [scenario, smoke]
-  - id: seed_canon_log
-    title: Seed canon log
-    path: ../../../seeds/canon-log.jsonl
-    visibility: tool_only
-    tags: [canon, smoke]
   - id: compiled_scenario
     title: Compiled smoke scenario
     path: compiled.yaml
