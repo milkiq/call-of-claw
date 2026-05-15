@@ -1,0 +1,58 @@
+schema_version: 1
+id: sum_target_smoke_plugin
+package_id: sum_target_smoke
+driver: rules_dsl_v1
+default_procedure_id: sum_check
+default_check_id: force
+dice:
+  base_sides: 6
+  base_dice: 2
+  max_dice: 4
+  bonus_flags: [prepared, expert, helped]
+difficulty_levels:
+  regular:
+    label: Regular
+    divisor: 1
+procedures:
+  sum_check:
+    label: Sum Target Check
+    kind: state
+    resolution: sum_compare
+    default_check_id: force
+    default_difficulty: regular
+    success_effect: The action succeeds.
+    failure_effect: The action fails or succeeds only after a serious complication.
+checks:
+  force:
+    label: Force
+    kind: state
+    source: target_total
+    default: 7
+    procedure_id: sum_check
+    success_when: at_or_above
+    keywords: [force, push, break, lift, carry, 强行, 推, 破坏, 举起, 搬动]
+  focus:
+    label: Focus
+    kind: state
+    source: target_total
+    default: 7
+    procedure_id: sum_check
+    success_when: at_or_above
+    keywords: [focus, study, repair, notice, carefully, 专注, 研究, 修理, 观察, 小心]
+bands:
+  "0":
+    id: failure
+    label: Failure
+    summary: The action fails or succeeds only after a serious complication.
+    world_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+  "1":
+    id: success
+    label: Success
+    summary: The action succeeds.
+gm_constraints:
+  - Use this plugin only for risky and uncertain actions.
+  - The total of all dice is compared against the target total.
+  - Do not decide success or failure outside the plugin result.

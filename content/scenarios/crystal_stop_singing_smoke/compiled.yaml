@@ -50,10 +50,13 @@ scenes:
       amount: 1
       reason: 玩家等待或失败时，安眠曲广播影响扩大。
     transitions:
-      - to: scene_2
+      - id: enter_station
+        to: scene_2
         when: 玩家安全靠港、进入货运大厅，或调查明确指向站内。
         result_bands: [success, success_with_cost, full_success, critical_success]
-        action_keywords: [hatch, open, enter, dock, station, 靠港, 进入, 舱门, 登站, 调查]
+        trigger:
+          evidence_tags: [entry, docking]
+          notes: Player establishes a route into the station.
   scene_2:
     title: 海盗在唱反调
     public_summary: >
@@ -76,10 +79,13 @@ scenes:
       amount: 1
       reason: 谈判拖延、失败或暴力升级会让广播更接近完成。
     transitions:
-      - to: scene_3
+      - id: go_to_core
+        to: scene_3
         when: 玩家拿到关键线索、工具，或直接前往核心舱。
         result_bands: [success, success_with_cost, full_success, critical_success]
-        action_keywords: [core, crystal, clue, tool, 核心, 水晶, 线索, 工具, 前往]
+        trigger:
+          evidence_tags: [leverage, pressure]
+          notes: Player has a route, leverage, or explicit intent to reach the core.
   scene_3:
     title: 水晶核心的安眠曲
     public_summary: >

@@ -1,7 +1,8 @@
 schema_version: 1
 id: lasers_feelings_smoke_compiled
 package_id: lasers_feelings_smoke
-resolver_id: threshold_d6
+resolver_id: rules_dsl_v1
+plugin_ref: rules_plugin
 default_target: 4
 default_approach: lasers
 default_character_context:

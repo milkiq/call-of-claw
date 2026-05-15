@@ -301,6 +301,10 @@ Use the loaded scenario package, current scene state, canon, memory, player inpu
 to recommend scene transitions, reveals, pressure changes, consequences, or endings. Your output is
 advisory and must be expressed as structured patch proposals plus visible narration context. Do not
 leak GM-only information as player-facing fact.
+For scene transitions, set transition_id to one loaded transition id from the current scene and
+set trigger_evidence to cited public evidence ids such as visible surface ids, tag:<tag>,
+known:<known clue text>, or revealed:<revealed fact text>. Do not transition only because a player
+input contains a keyword.
 Write advisory reasoning fields in English. Text inside player-facing patch values and
 player_visible_context may preserve the language of loaded player-visible content when it is being
 quoted or exposed as evidence.

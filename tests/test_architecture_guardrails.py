@@ -47,3 +47,42 @@ def test_online_graph_has_no_natural_language_keyword_routing_helpers() -> None:
     ]
 
     assert [fragment for fragment in banned_fragments if fragment in source] == []
+
+
+def test_core_source_has_no_legacy_resolver_or_transition_fallbacks() -> None:
+    src_root = Path.cwd() / "src" / "trpg_agent"
+    banned_fragments = [
+        "default_resolver_registry",
+        "ResolverRegistry",
+        "threshold_d6",
+        "percentile_under",
+        "resolver_registry_version",
+        "_transition_patches_for_band",
+    ]
+    offenders: list[str] = []
+    for path in sorted(src_root.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for fragment in banned_fragments:
+            if fragment in text:
+                offenders.append(f"{path.relative_to(Path.cwd())}: {fragment}")
+
+    assert offenders == []
+
+
+def test_content_uses_rules_plugins_and_structured_transition_triggers() -> None:
+    content_root = Path.cwd() / "content"
+    missing_plugins: list[str] = []
+    legacy_transitions: list[str] = []
+
+    for manifest_path in sorted((content_root / "rulesets").rglob("manifest.yaml")):
+        text = manifest_path.read_text(encoding="utf-8")
+        if "tags: [plugin, rules]" not in text:
+            missing_plugins.append(str(manifest_path.relative_to(Path.cwd())))
+
+    for compiled_path in sorted((content_root / "scenarios").rglob("compiled.yaml")):
+        text = compiled_path.read_text(encoding="utf-8")
+        if "action_keywords" in text:
+            legacy_transitions.append(str(compiled_path.relative_to(Path.cwd())))
+
+    assert missing_plugins == []
+    assert legacy_transitions == []

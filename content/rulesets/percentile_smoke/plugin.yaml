@@ -1,0 +1,47 @@
+schema_version: 1
+id: percentile_smoke_plugin
+package_id: percentile_smoke
+driver: rules_dsl_v1
+dice_expression: 1d100
+default_procedure_id: percentile_check
+default_check_id: careful
+difficulty_levels:
+  regular:
+    label: Regular
+    divisor: 1
+procedures:
+  percentile_check:
+    label: Percentile Check
+    kind: state
+    resolution: target_under
+    success_level_mode: binary
+    default_check_id: careful
+    default_difficulty: regular
+    success_effect: The action succeeds without adding an unlisted complication.
+    failure_effect: The action fails and the GM may apply one established pressure.
+checks:
+  careful:
+    label: Careful
+    kind: state
+    source: percentile_target
+    default: 55
+    procedure_id: percentile_check
+    success_when: at_or_below
+    keywords: [inspect, study, sneak, repair, 调查, 研究, 潜行, 修理]
+  forceful:
+    label: Forceful
+    kind: state
+    source: percentile_target
+    default: 55
+    procedure_id: percentile_check
+    success_when: at_or_below
+    keywords: [force, break, rush, 强行, 破坏, 冲]
+result_bands:
+  failure: The action fails and the GM may apply one established pressure.
+  success: The action succeeds without adding an unlisted complication.
+  hard_success: The action succeeds without adding an unlisted complication.
+  extreme_success: The action succeeds without adding an unlisted complication.
+  critical_success: The action succeeds without adding an unlisted complication.
+gm_constraints:
+  - Percentile resolution succeeds when the d100 total is less than or equal to the target.
+  - Do not invent injuries, clocks, or clues unless a scenario patch or result band authorizes them.

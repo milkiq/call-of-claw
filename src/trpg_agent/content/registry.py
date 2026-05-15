@@ -120,6 +120,10 @@ class ContentRegistry:
                     issues.append(f"{package.id}: package cannot extend itself")
                 if extension not in self.by_id:
                     issues.append(f"{package.id}: missing extension {extension}")
+            if package.kind == PackageKind.RULESET and not any(
+                "plugin" in reference.tags for reference in package.manifest.references
+            ):
+                issues.append(f"{package.id}: ruleset packages must declare a rules plugin")
             for reference in package.manifest.references:
                 path = package.reference_path(reference)
                 if not path.exists():
@@ -129,7 +133,14 @@ class ContentRegistry:
                 except ValueError:
                     issues.append(f"{package.id}: reference escapes project root: {reference.id}")
                 if "compiled" in reference.tags and path.exists():
-                    issues.extend(_validate_compiled_reference(package.id, reference.id, path))
+                    issues.extend(
+                        _validate_compiled_reference(
+                            package.id,
+                            reference.id,
+                            path,
+                            package.kind,
+                        )
+                    )
                 if "plugin" in reference.tags and path.exists():
                     issues.extend(_validate_plugin_reference(package.id, reference.id, path))
             reference_ids = {reference.id for reference in package.manifest.references}
@@ -146,6 +157,7 @@ def _validate_compiled_reference(
     package_id: str,
     reference_id: str,
     path: Path,
+    kind: PackageKind,
 ) -> list[str]:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -159,7 +171,26 @@ def _validate_compiled_reference(
             f"{package_id}: compiled reference {reference_id} package_id mismatch "
             f"({raw.get('package_id')})"
         )
+    if kind == PackageKind.RULESET and raw.get("resolver_id") != "rules_dsl_v1":
+        issues.append(
+            f"{package_id}: ruleset compiled reference {reference_id} must use "
+            "resolver_id rules_dsl_v1"
+        )
+    legacy_transition_key = "action_" + "keywords"
+    if kind == PackageKind.SCENARIO and _contains_key(raw, legacy_transition_key):
+        issues.append(
+            f"{package_id}: scenario compiled reference {reference_id} must use structured "
+            "transition triggers, not legacy keyword transitions"
+        )
     return issues
+
+
+def _contains_key(value: object, key: str) -> bool:
+    if isinstance(value, dict):
+        return key in value or any(_contains_key(item, key) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_key(item, key) for item in value)
+    return False
 
 
 def _validate_plugin_reference(

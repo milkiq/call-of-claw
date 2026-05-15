@@ -51,10 +51,14 @@ scenes:
       amount: 1
       reason: Delay lets servants remove evidence.
     transitions:
-      - to: study
+      - id: access_study
+        to: study
         when: The player gets access to the locked study or follows the balcony clue.
         result_bands: [success, success_with_cost, full_success, critical_success]
-        action_keywords: [study, balcony, locked, key, 书房, 阳台, 钥匙]
+        trigger:
+          evidence_surface_ids: [locked_balcony]
+          evidence_tags: [route, study]
+          notes: Player follows or opens the route toward the locked study.
   study:
     title: The Locked Study
     public_summary: >

@@ -71,7 +71,8 @@ from trpg_agent.langchain.structured import (
 from trpg_agent.langchain.tools import build_langchain_tools
 from trpg_agent.memory.projection import project_recent_summary
 from trpg_agent.memory.store import SqliteStore
-from trpg_agent.rules.compiled_resolver import RESOLVER_REGISTRY_VERSION, run_ruleset_resolver
+from trpg_agent.rules.compiled_resolver import RULES_PLUGIN_RUNTIME_VERSION, run_ruleset_resolver
+from trpg_agent.rules.plugin_runtime import RulesDslPlugin, load_rules_plugin
 from trpg_agent.scenario.director import (
     ScenarioPatchValidation,
     validate_scenario_director_decision,
@@ -145,7 +146,7 @@ def _runtime_metadata(state: GraphState) -> dict[str, Any]:
             "local_adjudication": LOCAL_ADJUDICATION_VERSION,
             "deterministic_tools": DETERMINISTIC_TOOL_VERSION,
         },
-        "resolver_registry_version": RESOLVER_REGISTRY_VERSION,
+        "rules_plugin_runtime_version": RULES_PLUGIN_RUNTIME_VERSION,
         "checkpoint_mode": state.get("checkpoint_mode", "none"),
         "advisor_contract_mode": _advisor_contract_mode(state),
         "context_budget_mode": _context_budget_mode(state),
@@ -393,6 +394,16 @@ def load_runtime_context(state: GraphState) -> GraphState:
             else:
                 ruleset = load_compiled_ruleset(registry, next_state["ruleset_id"])
             runtime_metadata["ruleset_resolver_id"] = ruleset.resolver_id
+            if preload.get("ruleset_id") == next_state.get("ruleset_id") and isinstance(
+                preload.get("rules_plugin"),
+                dict,
+            ):
+                plugin = RulesDslPlugin.model_validate(preload["rules_plugin"])
+            else:
+                plugin = load_rules_plugin(registry, next_state["ruleset_id"])
+            if plugin is not None:
+                runtime_metadata["rules_plugin_driver"] = plugin.driver
+                runtime_metadata["rules_plugin_id"] = plugin.id
             if not next_state.get("character_context"):
                 next_state["character_context"] = dict(ruleset.default_character_context)
         except Exception as error:  # pragma: no cover - content validation should catch this.

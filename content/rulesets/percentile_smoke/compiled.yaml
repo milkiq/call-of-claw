@@ -1,7 +1,8 @@
 schema_version: 1
 id: percentile_smoke_compiled
 package_id: percentile_smoke
-resolver_id: percentile_under
+resolver_id: rules_dsl_v1
+plugin_ref: rules_plugin
 default_target: 55
 default_approach: careful
 character_creation:

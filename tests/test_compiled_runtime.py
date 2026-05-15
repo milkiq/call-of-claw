@@ -3,7 +3,7 @@ from pathlib import Path
 from trpg_agent.content.compiled import load_compiled_ruleset, load_compiled_scenario
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.memory.store import SqliteStore
-from trpg_agent.rules.compiled_resolver import registered_resolver_ids, run_ruleset_resolver
+from trpg_agent.rules.compiled_resolver import run_ruleset_resolver
 from trpg_agent.rules.plugin_runtime import load_rules_plugin
 from trpg_agent.scenario.runtime import start_session, sync_scene_details
 
@@ -21,10 +21,13 @@ def test_compiled_packages_load() -> None:
     survival = load_compiled_scenario(registry, "storm_watch_survival")
     black_tide = load_compiled_scenario(registry, "black_tide_beacon")
 
-    assert ruleset.resolver_id == "threshold_d6"
-    assert sum_ruleset.resolver_id == "sum_target"
-    assert percentile_ruleset.resolver_id == "percentile_under"
+    assert ruleset.resolver_id == "rules_dsl_v1"
+    assert sum_ruleset.resolver_id == "rules_dsl_v1"
+    assert percentile_ruleset.resolver_id == "rules_dsl_v1"
     assert coc_ruleset.resolver_id == "rules_dsl_v1"
+    assert load_rules_plugin(registry, "lasers_feelings_smoke") is not None
+    assert load_rules_plugin(registry, "sum_target_smoke") is not None
+    assert load_rules_plugin(registry, "percentile_smoke") is not None
     assert load_rules_plugin(registry, "coc7_light_investigation") is not None
     assert ruleset.default_character_context == {
         "number": 4,
@@ -55,9 +58,7 @@ def test_compiled_packages_load() -> None:
     assert survival.initial_scene == "station_roof"
     assert black_tide.initial_scene == "harbor_road"
     assert scenario.initial_state.clock.value == 0
-    assert {"threshold_d6", "sum_target", "percentile_under"}.issubset(
-        set(registered_resolver_ids())
-    )
+    assert scenario.scenes["scene_1"].transitions[0].id == "enter_station"
 
 
 def test_compiled_ruleset_resolver_replays(tmp_path: Path) -> None:
@@ -129,7 +130,7 @@ def test_compiled_ruleset_owns_approach_keywords(tmp_path: Path) -> None:
     assert result["approach"] == "feelings"
 
 
-def test_second_resolver_family_runs_without_core_graph_changes(tmp_path: Path) -> None:
+def test_second_rules_plugin_runs_without_core_graph_changes(tmp_path: Path) -> None:
     root = Path.cwd()
 
     first = run_ruleset_resolver(
@@ -150,13 +151,14 @@ def test_second_resolver_family_runs_without_core_graph_changes(tmp_path: Path) 
     )
 
     assert first == second
-    assert first["resolver_id"] == "sum_target"
+    assert first["resolver_id"] == "rules_dsl_v1"
+    assert first["procedure_id"] == "sum_check"
     assert first["dice_expression"] == "2d6"
     assert first["target_number"] == 7
     assert first["successes"] in {0, 1}
 
 
-def test_resolver_can_emit_content_owned_scene_transition_patch() -> None:
+def test_resolver_does_not_emit_scene_transition_patch() -> None:
     root = Path.cwd()
     registry = ContentRegistry.load(root / "content", root)
     scenario = load_compiled_scenario(registry, "crystal_stop_singing_smoke")
@@ -177,10 +179,10 @@ def test_resolver_can_emit_content_owned_scene_transition_patch() -> None:
     )
 
     assert result["band"] == "success"
-    assert {"op": "set", "path": ["active_scene"], "value": "scene_2"} in result[
+    assert {"op": "set", "path": ["active_scene"], "value": "scene_2"} not in result[
         "world_patches"
     ]
-    assert any("Do not add extra costs" in text for text in result["narration_constraints"])
+    assert any("No world patches" in text for text in result["narration_constraints"])
 
 
 def test_same_action_can_use_different_resolver_families(tmp_path: Path) -> None:
@@ -204,12 +206,12 @@ def test_same_action_can_use_different_resolver_families(tmp_path: Path) -> None
         sqlite_path=str(tmp_path / "resolver.sqlite"),
     )
 
-    assert threshold["resolver_id"] == "threshold_d6"
-    assert sum_target["resolver_id"] == "sum_target"
+    assert threshold["resolver_id"] == "rules_dsl_v1"
+    assert sum_target["resolver_id"] == "rules_dsl_v1"
     assert threshold["dice_expression"] != sum_target["dice_expression"]
 
 
-def test_third_resolver_family_runs_without_core_graph_changes(tmp_path: Path) -> None:
+def test_third_rules_plugin_runs_without_core_graph_changes(tmp_path: Path) -> None:
     root = Path.cwd()
 
     result = run_ruleset_resolver(
@@ -221,7 +223,8 @@ def test_third_resolver_family_runs_without_core_graph_changes(tmp_path: Path) -
         sqlite_path=str(tmp_path / "resolver.sqlite"),
     )
 
-    assert result["resolver_id"] == "percentile_under"
+    assert result["resolver_id"] == "rules_dsl_v1"
+    assert result["procedure_id"] == "percentile_check"
     assert result["dice_expression"] == "1d100"
     assert result["target_number"] == 55
     assert result["successes"] in {0, 1}

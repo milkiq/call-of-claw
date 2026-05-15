@@ -54,14 +54,21 @@ scenes:
       amount: 1
       reason: The storm and tide worsen while the investigator delays outside.
     transitions:
-      - to: beacon_house
+      - id: reach_beacon_house
+        to: beacon_house
         when: The player follows the beam, enters the cottage, approaches the tower, repairs radio access, or investigates the beacon mechanism.
         result_bands: [success, hard_success, extreme_success, critical_success]
-        action_keywords: [beacon, cottage, tower, radio, repair, 灯塔, 小屋, 无线电, 修理]
-      - to: tide_cave
+        trigger:
+          evidence_tags: [beacon, radio]
+          notes: Player follows the visible beacon/radio evidence toward the house.
+      - id: descend_to_tide_cave
+        to: tide_cave
         when: The player follows the rock path down toward the tide cave or searches the rocks below.
         result_bands: [success, hard_success, extreme_success, critical_success]
-        action_keywords: [rocks, cave, tide, path, 海蚀洞, 岩石, 潮水, 小径]
+        trigger:
+          evidence_surface_ids: [slick_rock_path]
+          evidence_tags: [route, danger]
+          notes: Player follows the rock path toward the cave.
   beacon_house:
     title: Lantern Room and Radio Desk
     public_summary: >
@@ -94,10 +101,14 @@ scenes:
       amount: 1
       reason: Careful investigation inside the beacon house should surface one concrete clue.
     transitions:
-      - to: tide_cave
+      - id: descend_from_hatch
+        to: tide_cave
         when: The player opens the service hatch, follows the encoded tide route, tracks Voss below, or descends under the beacon.
         result_bands: [success, hard_success, extreme_success, critical_success]
-        action_keywords: [hatch, descend, below, cave, tide, service, 舱口, 下方, 海蚀洞, 潮水]
+        trigger:
+          evidence_surface_ids: [service_hatch]
+          evidence_tags: [route, danger]
+          notes: Player uses the hatch or encoded route to descend.
   tide_cave:
     title: Cave Under the Beacon
     public_summary: >

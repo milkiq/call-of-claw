@@ -1,7 +1,8 @@
 schema_version: 1
 id: sum_target_smoke_compiled
 package_id: sum_target_smoke
-resolver_id: sum_target
+resolver_id: rules_dsl_v1
+plugin_ref: rules_plugin
 default_target: 7
 default_approach: force
 default_character_context:

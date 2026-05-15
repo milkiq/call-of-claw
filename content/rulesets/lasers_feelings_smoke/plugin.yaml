@@ -1,0 +1,78 @@
+schema_version: 1
+id: lasers_feelings_smoke_plugin
+package_id: lasers_feelings_smoke
+driver: rules_dsl_v1
+default_procedure_id: approach_check
+default_check_id: lasers
+dice:
+  base_sides: 6
+  base_dice: 1
+  max_dice: 3
+  bonus_flags: [prepared, expert, helped]
+difficulty_levels:
+  regular:
+    label: Regular
+    divisor: 1
+procedures:
+  approach_check:
+    label: Approach Check
+    kind: state
+    resolution: count_successes
+    default_check_id: lasers
+    default_difficulty: regular
+    consume_flags: [prepared]
+    success_effect: The action succeeds according to the success band.
+    failure_effect: The action fails and the GM may advance established pressure.
+checks:
+  lasers:
+    label: 激光
+    kind: state
+    source: number
+    default: 4
+    procedure_id: approach_check
+    success_when: below
+    keywords: [激光, 科技, 科学, 冷静, 理性, 精确, 修理, 扫描, 破解, 计算, 射击]
+  feelings:
+    label: 感情
+    kind: state
+    source: number
+    default: 4
+    procedure_id: approach_check
+    success_when: above
+    keywords: [感情, 直觉, 魅力, 情绪, 热血, 外交, 说服, 安抚, 谈判, 共情, 唱, 挑衅, 鼓舞]
+exact_target:
+  counts_as_success: true
+  tag: laser_feelings
+  prompt: 你可以向GM问一个关于当前局势的问题，GM必须诚实回答。
+  effect: 如果答案能帮助你的下一步行动，下一次相关判定可视为准备充分。
+  grants_prepared: true
+bands:
+  "0":
+    id: failure
+    label: 失败
+    summary: 行动失败，GM 可以推进威胁或加入代价。
+    world_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+  "1":
+    id: success_with_cost
+    label: 有代价的成功
+    summary: 行动成功，但需要一个麻烦、代价或时钟推进。
+    world_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+  "2":
+    id: full_success
+    label: 完整成功
+    summary: 行动顺利完成。
+  "3":
+    id: critical_success
+    label: 暴击成功
+    summary: 行动完成，并获得一个额外好处。
+gm_constraints:
+  - Use this plugin only for risky and uncertain actions.
+  - Obvious actions do not require a roll.
+  - The player's described method determines the loaded check id.
+  - Do not decide success count or success band outside the plugin result.

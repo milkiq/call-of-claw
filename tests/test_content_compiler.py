@@ -148,7 +148,14 @@ def test_content_compiler_rejects_unknown_scenario_transition() -> None:
                 "start": {
                     "title": "Start",
                     "public_summary": "A room.",
-                    "transitions": [{"to": "missing", "when": "The player leaves."}],
+                    "transitions": [
+                        {
+                            "id": "leave_start",
+                            "to": "missing",
+                            "when": "The player leaves.",
+                            "trigger": {"evidence_tags": ["route"]},
+                        }
+                    ],
                 }
             },
         },

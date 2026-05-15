@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from trpg_agent.content.registry import ContentRegistry
 
@@ -104,11 +104,22 @@ class ScenarioMove(BaseModel):
     reason: str
 
 
+class TransitionTrigger(BaseModel):
+    evidence_surface_ids: list[str] = Field(default_factory=list)
+    evidence_tags: list[str] = Field(default_factory=list)
+    requires_known_clues: list[str] = Field(default_factory=list)
+    requires_revealed_facts: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+
 class SceneTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
     to: str
     when: str
     result_bands: list[str] = Field(default_factory=list)
-    action_keywords: list[str] = Field(default_factory=list)
+    trigger: TransitionTrigger = Field(default_factory=TransitionTrigger)
 
 
 class VisibleSurfaceSpec(BaseModel):

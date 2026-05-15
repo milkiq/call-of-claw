@@ -37,6 +37,7 @@ procedures:
   skill_check:
     label: Skill Check
     kind: skill
+    resolution: target_under
     default_check_id: spot_hidden
     default_difficulty: regular
     success_effect: The action succeeds and may reveal an appropriate clue or advantage.
@@ -46,6 +47,7 @@ procedures:
   attribute_check:
     label: Attribute Check
     kind: attribute
+    resolution: target_under
     default_check_id: int_check
     default_difficulty: regular
     success_effect: The attribute effort succeeds.
@@ -55,6 +57,7 @@ procedures:
   luck_check:
     label: Luck Check
     kind: state
+    resolution: target_under
     default_check_id: luck
     default_difficulty: regular
     success_effect: Chance favors the investigator without adding new facts.
@@ -71,6 +74,7 @@ procedures:
   sanity_check:
     label: Sanity Pressure Check
     kind: state
+    resolution: target_under
     default_check_id: sanity
     default_difficulty: regular
     success_effect: The investigator keeps composure while acknowledging the unnatural sight.
@@ -87,6 +91,7 @@ procedures:
   opposed_check:
     label: Opposed Check
     kind: opposed
+    resolution: target_under
     default_check_id: stealth
     default_difficulty: hard
     success_effect: The investigator wins the immediate opposed exchange.

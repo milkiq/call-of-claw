@@ -189,11 +189,11 @@ logic.
 
 Current status: implemented for the current runtime. The LLM turn graph runs `rules_adjudicator`
 only when the intent arbiter routes a turn to rules resolution. Its output is stored as advisory
-trace state and can provide resolver parameters such as loaded approach ids, requested rolls, and
-risk labels. Resolver protected arguments are sanitized by the graph. Dice, targets, success counts,
-bands, and world patches remain owned by deterministic resolver extensions. The resolver registry
-has two families, `threshold_d6` and `sum_target`, and cross-ruleset tests prove the core graph does
-not change when a second ruleset is added.
+trace state and can provide resolver parameters such as loaded procedure/check ids, difficulty,
+modifiers, pushed-roll flags, and risk labels. Resolver protected arguments are sanitized by the
+graph. Dice, targets, success counts, bands, opportunities, and rule-owned world patches remain
+owned by package-local rules plugins. All bundled rulesets now use `rules_dsl_v1`; the legacy
+built-in resolver registry has been removed from the production path.
 
 Implementation work:
 
@@ -205,22 +205,21 @@ Implementation work:
   - which loaded approach/stat/skill id applies;
   - stakes and fictional risk;
   - whether clarification is needed.
-- Deterministic resolver remains responsible for dice, targets, success counts, result bands, and
-  resolver-owned world patches.
-- Introduce resolver family registry so new rulesets add resolver modules/configs without widening
-  core graph logic.
-- Add tests with at least two different resolver families before declaring the boundary mature.
+- Deterministic rules plugins remain responsible for dice, targets, success counts, result bands,
+  opportunities, and resolver-owned world patches.
+- New rulesets add package-local plugin data, not new core resolver families.
+- Add tests with multiple plugin procedures before declaring the boundary mature.
 
 Verification:
 
-- Unit tests for resolver registry and extension loading.
+- Unit tests for rules plugin loading and strict missing-plugin failure.
 - Cross-ruleset tests proving core graph source contains no concrete rule labels.
 - Live eval cases where the same player action is adjudicated differently under different loaded
   rulesets.
 
 Acceptance:
 
-- Adding a second non-threshold ruleset does not require changes to core graph routing.
+- Adding another ruleset does not require changes to core graph routing.
 - Rules advisor cannot directly write world state.
 - Resolver output is deterministic, persisted, replayable, and cited in narration.
 
@@ -894,13 +893,14 @@ Acceptance:
 
 Goal: Make new rulesets easier to add without widening core graph logic.
 
-Current status: initial ruleset-owned plugin support is implemented through `rules_dsl_v1`.
-Compiled rulesets may reference a package-local `plugin.yaml`, rules advisors may select loaded
-procedure/check/difficulty ids, and the resolver dispatches through the package plugin before
-falling back to legacy built-in resolver families. `coc7_light_investigation` and
-`black_tide_beacon` exercise multiple attributes, skills, difficulty levels, pushed checks, sanity,
-luck, and pressure clocks. Remaining work is to harden the lifecycle into explicit prepare /
-resolve / explain-public phases and add a non-target-number ruleset.
+Current status: all bundled rulesets now use package-local `plugin.yaml` files with
+`rules_dsl_v1`. Compiled rulesets reference `plugin_ref`, rules advisors may select loaded
+procedure/check/difficulty ids, and `run_ruleset_resolver` fails if a ruleset has no package-local
+plugin. The legacy built-in resolver fallback has been removed from the production path.
+`coc7_light_investigation` and `black_tide_beacon` exercise multiple attributes, skills,
+difficulty levels, pushed checks, state pressure, and clocks. Remaining work is to harden the
+lifecycle into explicit prepare / resolve / explain-public phases and add a non-target-number
+ruleset.
 
 Flow before this milestone:
 
@@ -911,13 +911,13 @@ Flow before this milestone:
 3. Scenario/rules tests were easy to add, but a new game with a materially different procedure
    risked pushing game-specific interpretation into the graph.
 
-Flow after the first plugin implementation:
+Flow after the plugin migration:
 
 1. Play startup resolves the active ruleset/scenario, preloads package profiles and compiled
    package data, and warms the indexed content store.
 2. The rules advisor can only request procedure/check/difficulty ids available in the loaded
    ruleset package.
-3. The resolver loads the ruleset-owned plugin, validates requested ids/modifiers, performs
+3. The resolver must load the ruleset-owned plugin, validate requested ids/modifiers, perform
    deterministic dice through the shared dice tool, and emits a consequence envelope.
 4. Narration consumes validated tool results and package context; it does not invent rules
    consequences or inspect ruleset-specific keywords in core graph code.
@@ -928,21 +928,21 @@ Implementation work:
   - prepare;
   - resolve;
   - explain public result.
-- Define a thin JSON rules DSL for procedures, approach/stat ids, allowed modifiers, result bands,
-  opportunities, and authorized effects.
+- Define and maintain a thin JSON rules DSL for procedures, check/stat ids, allowed modifiers,
+  result bands, opportunities, and authorized effects.
 - Ensure rules advisors can select only loaded ids.
 - Ensure resolvers emit an authoritative consequence envelope consumed by Narrator.
 - Add at least one fiction-first or move-based smoke ruleset to validate non-target-number play.
 
 Verification:
 
-- Plugin contract tests for prepare, resolve, and explain-public.
+- Plugin contract tests for load, resolve, missing-plugin failure, and future prepare/explain-public.
 - Cross-ruleset golden cases where one fictional action maps differently by loaded ruleset.
 - Architecture guardrail scan proving new ruleset terms stay out of core source.
 
 Acceptance:
 
-- Adding a new ruleset requires content/plugin/tests, not core graph edits.
+- Adding a new ruleset requires content/plugin/tests, not core graph or built-in resolver edits.
 - Narrator never invents rule consequences outside the resolver envelope.
 - The runtime supports more than numeric target-family resolvers.
 
@@ -950,21 +950,25 @@ Acceptance:
 
 Goal: Replace action keyword transition matching with package-owned structured triggers.
 
-Current status: scenario transition behavior is package-validated and advisor-guided, but richer
-deterministic predicates are still a known risk.
+Current status: bundled scenarios now use structured transition ids and package-owned trigger
+evidence. Scenario Director proposes `transition_id` plus public evidence, and validation checks
+the current scene, target scene, result bands when available, patch authority, and visible or
+established evidence. Resolver-owned scene transition patches and legacy keyword transition fields
+have been removed from the runtime path.
 
 Implementation work:
 
-- Add structured transition predicates or triggers to scenario packages.
+- Maintain structured transition predicates or triggers in scenario packages.
 - Let Scenario Director output trigger evidence and candidate transition ids.
-- Validate transitions against package predicates, current state, scene set, and patch authority.
-- Keep legacy `action_keywords` compatibility but mark it deprecated in docs and tests.
+- Validate transitions against package predicates, current state, scene set, result bands when
+  available, visible evidence, and patch authority.
+- Reject legacy keyword transition fields during content validation.
 
 Verification:
 
 - Transition tests cover success, failure, partial success, passive waiting, wrong direction, and
   investigation.
-- A new scenario transitions without `action_keywords`.
+- All bundled scenarios transition without legacy keyword fields.
 - Source scan proves no scenario-specific transition logic enters core graph.
 
 Acceptance:

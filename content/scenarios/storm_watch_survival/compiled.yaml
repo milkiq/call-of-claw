@@ -50,10 +50,13 @@ scenes:
       amount: 1
       reason: Exposure to the gale worsens the station damage.
     transitions:
-      - to: generator_room
+      - id: retreat_to_generator
+        to: generator_room
         when: The player retreats inside, follows the cable path, or stabilizes the antenna.
         result_bands: [success, success_with_cost, full_success, critical_success]
-        action_keywords: [inside, cable, generator, retreat, stabilize, 进入, 电缆, 发电机, 稳定]
+        trigger:
+          evidence_tags: [route, shelter, cables]
+          notes: Player establishes movement from the roof into the station systems.
   generator_room:
     title: Generator Room
     public_summary: >

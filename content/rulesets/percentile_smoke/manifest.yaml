@@ -18,4 +18,9 @@ references:
     path: compiled.yaml
     visibility: tool_only
     tags: [compiled, rules]
+  - id: rules_plugin
+    title: Percentile smoke rules plugin
+    path: plugin.yaml
+    visibility: tool_only
+    tags: [plugin, rules]
 tests: []

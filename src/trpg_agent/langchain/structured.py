@@ -159,6 +159,8 @@ class ScenarioDirectorDecision(BaseModel):
         "ending",
     ]
     proposed_patches: list[dict] = Field(default_factory=list)
+    transition_id: str | None = None
+    trigger_evidence: list[str] = Field(default_factory=list)
     player_visible_context: str
     gm_only_reason: str
     citations: list[str] = Field(default_factory=list)
@@ -289,6 +291,8 @@ class ScenarioDirectorWire(BaseModel):
         "ending",
     ]
     patches: list[dict[str, Any]] = Field(default_factory=list, max_length=4)
+    trans: str | None = Field(default=None, max_length=80)
+    evidence: list[str] = Field(default_factory=list, max_length=6)
     visible: str = Field(default="", max_length=500)
     code: str | None = Field(default=None, max_length=160)
     refs: list[str] = Field(default_factory=list, max_length=5)
@@ -430,7 +434,8 @@ COMPACT_RESPONSE_CONTRACTS: dict[str, str] = {
     ),
     "ScenarioDirectorWire": (
         '{"decision": no_change|reveal|transition|advance_pressure|consequence|clarify|ending, '
-        '"patches": [object], "visible": "<=500 chars", "code": null|string, "refs": []}'
+        '"patches": [object], "trans": null|string, "evidence": [string], '
+        '"visible": "<=500 chars", "code": null|string, "refs": []}'
     ),
     "SingleTurnAdvisorWire": (
         '{"routing": IntentRoutingWire, "rules": RulesAdviceWire, "plan": TurnPlanWire, '
@@ -624,6 +629,8 @@ def _adapt_scenario_director(wire: ScenarioDirectorWire) -> ScenarioDirectorDeci
     return ScenarioDirectorDecision(
         decision=wire.decision,
         proposed_patches=list(wire.patches),
+        transition_id=wire.trans,
+        trigger_evidence=list(wire.evidence),
         player_visible_context=wire.visible,
         gm_only_reason=wire.code or _reason("compact scenario director", wire.decision),
         citations=list(wire.refs),

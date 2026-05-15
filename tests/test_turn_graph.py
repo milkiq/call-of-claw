@@ -2090,7 +2090,7 @@ def test_turn_graph_executes_ruleset_resolver() -> None:
     assert result["tool_requests"][0]["tool_name"] == "run_ruleset_resolver"
 
 
-def test_resolver_result_can_transition_scene_from_compiled_scenario() -> None:
+def test_resolver_result_does_not_transition_scene_from_compiled_scenario() -> None:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
     from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
@@ -2130,11 +2130,11 @@ def test_resolver_result_can_transition_scene_from_compiled_scenario() -> None:
 
     assert result["tool_results"][0]["ok"] is True
     assert result["tool_results"][0]["result"]["band"] == "success"
-    assert {"op": "set", "path": ["active_scene"], "value": "scene_2"} in result[
+    assert {"op": "set", "path": ["active_scene"], "value": "scene_2"} not in result[
         "tool_results"
     ][0]["result"]["world_patches"]
-    assert result["world_projection"]["active_scene"] == "scene_2"
-    assert result["world_projection"]["scene"]["id"] == "scene_2"
+    assert result["world_projection"]["active_scene"] == "scene_1"
+    assert result["world_projection"]["scene"]["id"] == "scene_1"
 
 
 def test_turn_graph_local_mode_does_not_keyword_route_passive(tmp_path) -> None:
@@ -2259,9 +2259,10 @@ def test_durable_turn_graph_uses_sqlite_checkpointer_and_persists_metadata(tmp_p
     assert result["runtime_metadata"]["graph_version"] == "turn-graph-v2"
     assert trace["runtime_metadata"]["checkpoint_mode"] == "sqlite"
     assert trace["runtime_metadata"]["model"]["provider"] == "test"
-    assert trace["runtime_metadata"]["resolver_registry_version"] == "resolver-registry-v1"
+    assert trace["runtime_metadata"]["rules_plugin_runtime_version"] == "rules-plugin-runtime-v1"
     assert trace["runtime_metadata"]["content_packages"]["lasers_feelings_smoke"] == "0.1.0"
-    assert trace["runtime_metadata"]["ruleset_resolver_id"] == "threshold_d6"
+    assert trace["runtime_metadata"]["ruleset_resolver_id"] == "rules_dsl_v1"
+    assert trace["runtime_metadata"]["rules_plugin_id"] == "lasers_feelings_smoke_plugin"
 
 
 def test_durable_turn_graph_resumes_after_interrupted_apply_step(tmp_path) -> None:
@@ -2339,6 +2340,8 @@ def test_llm_scenario_director_validates_and_applies_package_patches(tmp_path) -
             """
             {
               "decision": "transition",
+              "transition_id": "enter_station",
+              "trigger_evidence": ["tag:entry"],
               "proposed_patches": [
                 {"operation": "set", "path": "active_scene", "value": "scene_2"},
                 {

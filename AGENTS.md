@@ -21,12 +21,15 @@ long-play evaluation, and user-facing play profiles.
 - Local no-model mode is only a structural debug fallback. It may parse slash commands, but it must
   not guess natural-language intent, risk, target categories, or mechanically interpret `NdM` dice
   expressions inside ordinary player prose.
-- Ruleset-specific adjudication belongs in compiled ruleset packages and resolver extensions.
+- Ruleset-specific adjudication belongs in compiled ruleset packages and package-local rules
+  plugins. Do not add new built-in ruleset resolver families to core runtime.
 - Scenario-specific GM requirements, secrets, scenes, clocks, NPCs, clues, and endings belong in
   compiled scenario packages.
 - Scenario fast paths may expose only package-owned public fields such as compiled
   `visible_surfaces`; they must not derive hidden reveals, transitions, consequences, clocks, or
   clues from player-input keywords.
+- Scene transitions must be proposed by Scenario Director and validated against package-owned
+  transition ids/triggers. Resolvers must not emit scene transition patches.
 - GM style, table tone, and NPC voice are style state or package data. They must not authorize
   durable facts, world changes, hidden reveals, rule effects, or player decisions.
 - LLM output is advisory until validated by structured schemas and deterministic tools. Durable
