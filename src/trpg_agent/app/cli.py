@@ -13,13 +13,18 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.history import InMemoryHistory
+    from prompt_toolkit.styles import Style
 except ImportError:  # pragma: no cover - exercised only when dependency is missing.
     PromptSession = None
     InMemoryHistory = None
+    Style = None
 
 from trpg_agent.app.config import load_config
 from trpg_agent.content.compiled import load_compiled_ruleset, load_compiled_scenario
@@ -149,12 +154,20 @@ GRAPH_PROGRESS_LABELS = {
 class InteractiveInput:
     def __init__(self) -> None:
         self._session: Any | None = None
+        self._style: Any | None = None
         if (
             PromptSession is not None
             and InMemoryHistory is not None
             and sys.stdin.isatty()
             and sys.stdout.isatty()
         ):
+            if Style is not None:
+                self._style = Style.from_dict(
+                    {
+                        "prompt.role": "ansicyan bold",
+                        "prompt.suffix": "ansiwhite",
+                    }
+                )
             self._session = PromptSession(history=InMemoryHistory())
 
     def prompt(
@@ -166,8 +179,11 @@ class InteractiveInput:
         show_default: bool = False,
     ) -> str:
         if self._session is not None:
-            message = f"{text}{prompt_suffix}"
-            return str(self._session.prompt(message, default=default))
+            message = [
+                ("class:prompt.role", text),
+                ("class:prompt.suffix", prompt_suffix),
+            ]
+            return str(self._session.prompt(message, default=default, style=self._style))
         return str(
             typer.prompt(
                 text,
@@ -1200,7 +1216,94 @@ def _print_play_result(result: dict[str, Any], *, json_output: bool) -> None:
     if json_output:
         typer.echo(json.dumps(_play_result_payload(result), ensure_ascii=False, indent=2))
         return
-    console.print(result.get("final_output", ""), markup=False)
+    if result.get("manual_roll"):
+        _print_manual_roll_result(result)
+        return
+    _print_gm_message(result.get("final_output", ""))
+
+
+def _plain_text(value: Any) -> Text:
+    text = str(value or "").strip()
+    return Text(text if text else "(empty)")
+
+
+def _print_panel(
+    title: str,
+    body: Any,
+    *,
+    border_style: str = "cyan",
+    title_style: str = "bold cyan",
+) -> None:
+    console.print(
+        Panel(
+            _plain_text(body),
+            title=Text(title, style=title_style),
+            title_align="left",
+            border_style=border_style,
+            style="white",
+            padding=(1, 2),
+        )
+    )
+
+
+def _print_play_header(
+    *,
+    session_id: str,
+    ruleset_id: str,
+    scenario_id: str,
+    profile_name: str,
+) -> None:
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column(style="white")
+    table.add_row("session", session_id)
+    table.add_row("ruleset", ruleset_id)
+    table.add_row("scenario", scenario_id)
+    table.add_row("profile", profile_name)
+    console.print(
+        Panel(
+            table,
+            title="TRPG Play",
+            title_align="left",
+            border_style="bright_blue",
+            padding=(1, 2),
+        )
+    )
+
+
+def _print_opening(text: str) -> None:
+    _print_panel("开场", text, border_style="green", title_style="bold green")
+
+
+def _print_gm_message(text: str) -> None:
+    _print_panel("GM", text, border_style="cyan", title_style="bold cyan")
+
+
+def _print_system_notice(text: str) -> None:
+    console.print(Text(str(text), style="dim"))
+
+
+def _print_warning(text: str) -> None:
+    console.print(Text(str(text), style="yellow"))
+
+
+def _print_manual_roll_result(result: dict[str, Any]) -> None:
+    manual_roll = result.get("manual_roll") or {}
+    lines = [
+        f"表达式: {manual_roll.get('expression', '')}",
+        f"结果: {manual_roll.get('rolls', [])}",
+        f"总计: {manual_roll.get('total', '')}",
+        "性质: 非规则判定",
+    ]
+    reason = manual_roll.get("reason")
+    if reason:
+        lines.insert(1, f"说明: {reason}")
+    _print_panel("手动掷骰", "\n".join(lines), border_style="magenta", title_style="bold magenta")
+
+
+def _print_exit_resume(session_id: str) -> None:
+    body = Text(f"session-id: {session_id}\nresume: trpg play --session-id {session_id}")
+    console.print(Panel(body, title="退出", title_align="left", border_style="bright_black"))
 
 
 def _run_interactive_play_loop(
@@ -1247,11 +1350,14 @@ def _run_interactive_play_loop(
         scenario_id=selected_scenario,
         reset=False,
     )
-    console.print(f"session: {resolved_session_id}", markup=False)
-    console.print(f"ruleset: {selected_ruleset}", markup=False)
-    console.print(f"scenario: {selected_scenario}", markup=False)
+    _print_play_header(
+        session_id=resolved_session_id,
+        ruleset_id=selected_ruleset,
+        scenario_id=selected_scenario,
+        profile_name=profile_config.name,
+    )
     if not had_state or not had_turns:
-        console.print(opening.strip(), markup=False)
+        _print_opening(opening)
     if not _has_player_character(state):
         prompt_input = InteractiveInput()
         state = _ensure_character_created(
@@ -1267,13 +1373,13 @@ def _run_interactive_play_loop(
         prompt_input = InteractiveInput()
         character = _player_character(state)
         if character and character.get("name"):
-            console.print(f"resuming character: {character['name']}", markup=False)
-        console.print("resuming session. Type /help for commands.", markup=False)
+            _print_system_notice(f"resuming character: {character['name']}")
+        _print_system_notice("resuming session. Type /help for commands.")
 
     with durable_turn_graph(sqlite_path=config.sqlite_path, model=model) as graph:
         while True:
             try:
-                player_text = prompt_input.prompt("你", prompt_suffix="> ")
+                player_text = prompt_input.prompt("玩家", prompt_suffix=" > ")
             except (EOFError, KeyboardInterrupt):
                 console.print("")
                 break
@@ -1302,7 +1408,7 @@ def _run_interactive_play_loop(
                         command_text=text,
                     )
                 except ValueError as error:
-                    console.print(f"roll failed: {error}", markup=False)
+                    _print_warning(f"roll failed: {error}")
                     continue
                 _print_play_result(result, json_output=json_output)
                 continue
@@ -1327,13 +1433,20 @@ def _run_interactive_play_loop(
                 continue
             _print_play_result(result, json_output=json_output)
 
-    console.print(f"session-id: {resolved_session_id}", markup=False)
-    console.print(f"resume: trpg play --session-id {resolved_session_id}", markup=False)
+    _print_exit_resume(resolved_session_id)
 
 
 def _print_interactive_help() -> None:
-    console.print("Commands: /help, /recap, /session, /roll <NdM>, /quit", markup=False)
-    console.print("Type any other text as your character's action.", markup=False)
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold cyan")
+    table.add_column(style="white")
+    table.add_row("/help", "显示命令")
+    table.add_row("/recap", "查看最近回合")
+    table.add_row("/session", "查看当前 session 与角色")
+    table.add_row("/roll <NdM>", "手动掷骰，不作为规则判定")
+    table.add_row("/quit", "退出并显示恢复命令")
+    console.print(Panel(table, title="命令", title_align="left", border_style="bright_black"))
+    _print_system_notice("Type any other text as your character's action.")
 
 
 def _run_manual_roll_command(
@@ -1475,19 +1588,26 @@ def _profile_metadata(profile_config: PlayProfileConfig) -> dict[str, str]:
 def _print_session_recap(store: SqliteStore, session_id: str) -> None:
     turns = store.list_turns(session_id)[-5:]
     if not turns:
-        console.print("No turns yet.", markup=False)
+        _print_system_notice("No turns yet.")
         return
+    table = Table.grid(padding=(0, 1))
+    table.add_column(style="bold cyan")
+    table.add_column(style="white")
     for turn in turns:
-        console.print(f"- player: {turn['input']}", markup=False)
-        console.print(f"  gm: {turn['output']}", markup=False)
+        table.add_row("玩家", str(turn["input"]))
+        table.add_row("GM", str(turn["output"]))
+        table.add_row("", "")
+    console.print(Panel(table, title="最近回合", title_align="left", border_style="cyan"))
 
 
 def _print_interactive_session(store: SqliteStore, session_id: str) -> None:
     payload = _session_payload(store, session_id=session_id, include_gm=False)
-    console.print(json.dumps(payload["session"], ensure_ascii=False, indent=2), markup=False)
+    session_body = json.dumps(payload["session"], ensure_ascii=False, indent=2)
+    _print_panel("Session", session_body, border_style="bright_black")
     character = payload.get("world_projection", {}).get("character_context", {})
     if character:
-        console.print(json.dumps(character, ensure_ascii=False, indent=2), markup=False)
+        character_body = json.dumps(character, ensure_ascii=False, indent=2)
+        _print_panel("角色", character_body, border_style="green")
 
 
 def _ensure_character_created(
@@ -1515,7 +1635,7 @@ def _ensure_character_created(
         store.set_session_state(session_id=session_id, state=state)
         return state
 
-    console.print(spec.intro.strip(), markup=False)
+    _print_panel("角色创建", spec.intro.strip(), border_style="green", title_style="bold green")
     answers: dict[str, str] = {}
     for question in spec.questions:
         answers[question.id] = _ask_character_question(question, prompt_input)
@@ -1529,8 +1649,7 @@ def _ensure_character_created(
     state["character_context"] = character_context
     store.set_session_state(session_id=session_id, state=state)
     summary = _render_character_summary(spec.summary_template, player_character, character_context)
-    console.print("角色创建完成：", markup=False)
-    console.print(summary, markup=False)
+    _print_panel("角色", summary, border_style="green", title_style="bold green")
     return state
 
 
@@ -1555,13 +1674,13 @@ def _ask_character_question(question: Any, prompt_input: InteractiveInput) -> st
     while True:
         answer = prompt_input.prompt(prompt, default="", show_default=False).strip()
         if not answer and question.required:
-            console.print("这个问题需要回答。", markup=False)
+            _print_warning("这个问题需要回答。")
             continue
         if question.numeric_range and answer:
             value = _parse_first_int(answer)
             lower, upper = question.numeric_range[0], question.numeric_range[1]
             if value is None or value < lower or value > upper:
-                console.print(f"请输入 {lower}-{upper} 范围内的数字。", markup=False)
+                _print_warning(f"请输入 {lower}-{upper} 范围内的数字。")
                 continue
         return answer
 

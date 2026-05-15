@@ -175,6 +175,52 @@ def test_session_cli_start_play_recap_inspect_and_export(tmp_path) -> None:
     assert "resolver_bypass_count: 0" in quality.output
 
 
+def test_play_cli_non_json_output_distinguishes_gm_and_manual_roll(tmp_path) -> None:
+    runner = CliRunner()
+    env = {"TRPG_AGENT_SQLITE": str(tmp_path / "play-style.sqlite")}
+
+    gm_turn = runner.invoke(
+        app,
+        [
+            "play",
+            "--local",
+            "--session-id",
+            "style-session",
+            "--input",
+            "我观察风暴",
+            "--ruleset-id",
+            "sum_target_smoke",
+            "--scenario-id",
+            "storm_watch_survival",
+        ],
+        env=env,
+    )
+
+    assert gm_turn.exit_code == 0
+    assert "GM" in gm_turn.output
+
+    manual_roll = runner.invoke(
+        app,
+        [
+            "play",
+            "--local",
+            "--session-id",
+            "style-session",
+            "--input",
+            "/roll 1d6 style check",
+            "--ruleset-id",
+            "sum_target_smoke",
+            "--scenario-id",
+            "storm_watch_survival",
+        ],
+        env=env,
+    )
+
+    assert manual_roll.exit_code == 0
+    assert "手动掷骰" in manual_roll.output
+    assert "非规则判定" in manual_roll.output
+
+
 def test_eval_observation_report_cli_outputs_json(tmp_path) -> None:
     runner = CliRunner()
     env = {"TRPG_AGENT_SQLITE": str(tmp_path / "observation.sqlite")}
