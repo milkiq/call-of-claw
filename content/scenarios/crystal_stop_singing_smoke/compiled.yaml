@@ -29,6 +29,19 @@ scenes:
     public_summary: >
       中继站外壳有切割痕迹，停泊环缓慢旋转，逃生艇漂浮在外。
       自动导航被歌声干扰，正试图靠近歌声中心。
+    visible_surfaces:
+      - id: station_cut_marks
+        text: 中继站外壳有清晰的切割痕迹，像是近期被外力打开过。
+        tags: [observation, exterior, entry]
+        one_shot: true
+      - id: rotating_docking_ring
+        text: 停泊环正在缓慢旋转，半开的接口会周期性掠过猛禽号前方。
+        tags: [observation, docking, entry]
+        one_shot: true
+      - id: drifting_escape_pods
+        text: 几艘小型逃生艇漂浮在外，舷窗后的人影安静不动。
+        tags: [observation, danger, survivors]
+        one_shot: true
     gm_only:
       - 歌声来自核心舱中的虚空水晶。
       - 海盗进入过中继站，但不是主谋。
@@ -46,6 +59,15 @@ scenes:
     public_summary: >
       货运大厅低重力漂浮，海盗们微笑着哼唱。一个保持清醒的海盗领袖
       正用噪音抵抗歌声。
+    visible_surfaces:
+      - id: humming_pirates
+        text: 十几个海盗靠墙漂浮或坐着，脸上带着安静的微笑，整齐地哼唱。
+        tags: [observation, npc, pressure]
+        one_shot: true
+      - id: vega_noise
+        text: 中央那个保持清醒的海盗正用弯刀敲击地面，制造刺耳噪音抵抗歌声。
+        tags: [observation, npc, leverage]
+        one_shot: true
     gm_only:
       - 她知道水晶需要双频共振才能安全断开。
       - 海盗调频器可以提供其中一个频率。
@@ -62,6 +84,15 @@ scenes:
     title: 水晶核心的安眠曲
     public_summary: >
       核心舱内巨大的晶体悬浮，歌声像在脑海里劝人停下选择。广播阵列即将对准星球。
+    visible_surfaces:
+      - id: suspended_crystal
+        text: 核心舱中央的巨大晶体悬浮着，歌声从它周围的广播阵列层层扩散。
+        tags: [observation, threat, core]
+        one_shot: true
+      - id: broadcast_alignment
+        text: 广播阵列正在缓慢校准方向，目标显然不止是中继站内部。
+        tags: [observation, pressure, objective]
+        one_shot: true
     gm_only:
       - 威胁可以被技术震离、情感说服、欺骗、共情或荒唐合唱解决。
       - 真诚但矛盾的情绪能让合唱体停顿。

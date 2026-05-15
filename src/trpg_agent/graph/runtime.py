@@ -277,6 +277,7 @@ def _node_category(node: str) -> str:
         "advise_turn_with_single_llm",
         "advise_rules_with_llm",
         "adjudicate_with_llm",
+        "select_scenario_surface_with_llm",
         "direct_scenario_with_llm",
         "narrate_with_llm",
     }:

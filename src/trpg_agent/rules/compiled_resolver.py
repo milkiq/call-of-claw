@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from trpg_agent.content.compiled import CompiledRuleset, ResolutionBand, load_compiled_ruleset
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.memory.store import SqliteStore
+from trpg_agent.rules.plugin_runtime import load_rules_plugin, resolve_rules_dsl
 from trpg_agent.rules.resolver_runtime import ResolverRegistry
 from trpg_agent.tools.dice import roll_dice_once
 from trpg_agent.tools.patches import WorldPatch
@@ -20,6 +21,12 @@ class RulesetResolverInput(BaseModel):
     ruleset_id: str
     action: str
     approach: str | None = None
+    procedure_id: str | None = None
+    check_id: str | None = None
+    difficulty: str | None = None
+    modifier: str | None = None
+    pushed: bool = False
+    opposed_by: str | None = None
     risk: str = "risky_uncertain"
     character_context: dict[str, Any] = Field(default_factory=dict)
     scene_context: dict[str, Any] = Field(default_factory=dict)
@@ -33,14 +40,24 @@ class RulesetResolverResult(BaseModel):
     ruleset_id: str
     action: str
     approach: str
+    procedure_id: str | None = None
+    check_id: str | None = None
     target_number: int
+    target_value: int | None = None
+    difficulty_level: str | None = None
+    modifier: str | None = None
+    pushed: bool = False
     dice_expression: str
     dice_result: dict[str, Any]
+    roll_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    selected_roll: dict[str, Any] | None = None
     successes: int
+    success_level: str | None = None
     exact_target_hits: int = 0
     band: str
     band_label: str
     consequence: str
+    authorized_effects: list[str] = Field(default_factory=list)
     world_patches: list[dict[str, Any]] = Field(default_factory=list)
     narration_constraints: list[str] = Field(default_factory=list)
 
@@ -50,6 +67,12 @@ def run_ruleset_resolver(
     ruleset_id: str,
     action: str,
     approach: str | None = None,
+    procedure_id: str | None = None,
+    check_id: str | None = None,
+    difficulty: str | None = None,
+    modifier: str | None = None,
+    pushed: bool = False,
+    opposed_by: str | None = None,
     risk: str = "risky_uncertain",
     character_context: dict[str, Any] | None = None,
     scene_context: dict[str, Any] | None = None,
@@ -62,6 +85,12 @@ def run_ruleset_resolver(
         ruleset_id=ruleset_id,
         action=action,
         approach=approach,
+        procedure_id=procedure_id,
+        check_id=check_id,
+        difficulty=difficulty,
+        modifier=modifier,
+        pushed=pushed,
+        opposed_by=opposed_by,
         risk=risk,
         character_context=character_context or {},
         scene_context=scene_context or {},
@@ -71,6 +100,23 @@ def run_ruleset_resolver(
     )
     registry = ContentRegistry.load(Path(content_dir), Path(content_dir).parent)
     ruleset = load_compiled_ruleset(registry, ruleset_id)
+    plugin = load_rules_plugin(registry, ruleset_id)
+    if plugin is not None:
+        return resolve_rules_dsl(
+            plugin=plugin,
+            action=request.action,
+            character_context=request.character_context,
+            scene_context=request.scene_context,
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            sqlite_path=request.sqlite_path,
+            procedure_id=request.procedure_id,
+            check_id=request.check_id or request.approach,
+            difficulty=request.difficulty,
+            modifier=request.modifier,
+            pushed=request.pushed,
+            load_or_roll=_load_or_roll,
+        )
     resolver = default_resolver_registry().get(ruleset.resolver_id)
     return resolver.resolve(ruleset, request).model_dump()
 

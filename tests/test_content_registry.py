@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from trpg_agent.content.compiled import load_compiled_scenario
 from trpg_agent.content.packages import PackageKind
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.content.retrieval import search_registry_text, search_registry_text_indexed
@@ -78,3 +79,21 @@ def test_capability_skill_package_is_reusable_extension() -> None:
     skill_profile = next(profile for profile in profiles if profile["id"] == "clue_hygiene_skill")
     assert skill_profile["kind"] == PackageKind.CAPABILITY_SKILL.value
     assert skill_profile["disclosure"]["advisor_manifest_first"] is True
+
+
+def test_compiled_scenario_visible_surfaces_are_public_not_gm_only() -> None:
+    root = Path.cwd()
+    registry = ContentRegistry.load(root / "content", root)
+
+    for package in registry.by_kind(PackageKind.SCENARIO):
+        scenario = load_compiled_scenario(registry, package.id)
+        surface_count = 0
+        for scene in scenario.scenes.values():
+            surface_count += len(scene.visible_surfaces)
+            for surface in scene.visible_surfaces:
+                assert surface.id
+                assert surface.text.strip()
+                for secret in scene.gm_only:
+                    assert surface.text not in secret
+                    assert secret not in surface.text
+        assert surface_count > 0

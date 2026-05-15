@@ -30,6 +30,19 @@ scenes:
     public_summary: >
       Wet footprints cross the foyer tiles, a grandfather clock has stopped, and the locked study
       balcony overlooks the room.
+    visible_surfaces:
+      - id: wet_footprints
+        text: Wet footprints cross the foyer tiles and stop beneath the locked study balcony.
+        tags: [observation, clue, foyer]
+        one_shot: true
+      - id: stopped_clock
+        text: The grandfather clock in the foyer has stopped.
+        tags: [observation, clue, clock]
+        one_shot: true
+      - id: locked_balcony
+        text: The locked study balcony overlooks the foyer from above.
+        tags: [observation, route, study]
+        one_shot: true
     gm_only:
       - The footprints were staged after the owner vanished.
       - The stopped clock hides a torn appointment note.
@@ -47,6 +60,15 @@ scenes:
     public_summary: >
       The study smells of extinguished candles. Papers lie scattered beside a clean rectangle on the
       dusty desk.
+    visible_surfaces:
+      - id: extinguished_candles
+        text: The study smells of extinguished candles.
+        tags: [observation, study]
+        one_shot: true
+      - id: clean_rectangle
+        text: Papers lie scattered beside a clean rectangle on the dusty desk.
+        tags: [observation, clue, desk]
+        one_shot: true
     gm_only:
       - The missing document names the estate debt.
       - A servant hid the document in the rain barrel.

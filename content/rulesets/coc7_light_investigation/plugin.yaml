@@ -1,0 +1,197 @@
+schema_version: 1
+id: coc7_light_investigation_plugin
+package_id: coc7_light_investigation
+driver: rules_dsl_v1
+dice_expression: 1d100
+default_procedure_id: skill_check
+default_check_id: spot_hidden
+difficulty_levels:
+  regular:
+    label: Regular
+    divisor: 1
+  hard:
+    label: Hard
+    divisor: 2
+  extreme:
+    label: Extreme
+    divisor: 5
+attributes:
+  str: {label: Strength, default: 45, keywords: [force, lift, 强行, 搬, 推]}
+  dex: {label: Dexterity, default: 55, keywords: [dodge, balance, 闪避, 平衡]}
+  int: {label: Intelligence, default: 65, keywords: [deduce, logic, 推理, 分析]}
+  pow: {label: Power, default: 55, keywords: [will, resist, 意志, 抵抗]}
+  con: {label: Constitution, default: 50, keywords: [endure, poison, 忍耐, 毒]}
+  app: {label: Appearance, default: 50, keywords: [impress, charm, 魅力, 取信]}
+  edu: {label: Education, default: 60, keywords: [know, academic, 学识, 知识]}
+skills:
+  spot_hidden: {label: Spot Hidden, default: 60, keywords: [observe, inspect, search, look, 观察, 搜索, 调查, 查看, 侦查]}
+  library_use: {label: Library Use, default: 55, keywords: [research, archive, books, records, 资料, 档案, 图书馆, 记录]}
+  listen: {label: Listen, default: 45, keywords: [listen, sound, hear, 聆听, 声音, 听]}
+  psychology: {label: Psychology, default: 40, keywords: [read, motive, lie, 心理, 动机, 撒谎]}
+  stealth: {label: Stealth, default: 40, keywords: [sneak, hide, quietly, 潜行, 躲, 悄悄]}
+  persuade: {label: Persuade, default: 45, keywords: [persuade, convince, calm, 说服, 劝, 安抚]}
+  mechanical_repair: {label: Mechanical Repair, default: 50, keywords: [repair, machine, radio, beacon, 修理, 机械, 无线电, 灯塔]}
+  occult: {label: Occult, default: 35, keywords: [occult, ritual, symbol, 神秘, 仪式, 符号]}
+  first_aid: {label: First Aid, default: 45, keywords: [first aid, bandage, 急救, 包扎]}
+procedures:
+  skill_check:
+    label: Skill Check
+    kind: skill
+    default_check_id: spot_hidden
+    default_difficulty: regular
+    success_effect: The action succeeds and may reveal an appropriate clue or advantage.
+    failure_effect: The attempt fails; apply only an established scene pressure.
+    pushed_failure_effect: The pushed attempt fails; intensify the established danger or pressure clock.
+    keywords: [skill, 技能]
+  attribute_check:
+    label: Attribute Check
+    kind: attribute
+    default_check_id: int_check
+    default_difficulty: regular
+    success_effect: The attribute effort succeeds.
+    failure_effect: The effort fails and exposes the investigator to a scene pressure.
+    pushed_failure_effect: The pushed effort fails and creates a stronger complication.
+    keywords: [attribute, 属性]
+  luck_check:
+    label: Luck Check
+    kind: state
+    default_check_id: luck
+    default_difficulty: regular
+    success_effect: Chance favors the investigator without adding new facts.
+    failure_effect: Chance turns against the investigator; advance only established pressure.
+    pushed_failure_effect: Luck cannot be pushed unless the scenario explicitly permits it.
+    state_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+        pushed_value: 2
+        cap_path: [clock, max]
+        apply_on: [failure]
+    keywords: [luck, 幸运]
+  sanity_check:
+    label: Sanity Pressure Check
+    kind: state
+    default_check_id: sanity
+    default_difficulty: regular
+    success_effect: The investigator keeps composure while acknowledging the unnatural sight.
+    failure_effect: The investigator is shaken; advance the scenario pressure clock if present.
+    pushed_failure_effect: The investigator fixates on the unnatural; advance the pressure clock further if present.
+    state_patches:
+      - op: increment
+        path: [clock, value]
+        value: 1
+        pushed_value: 2
+        cap_path: [clock, max]
+        apply_on: [failure]
+    keywords: [sanity, 理智]
+  opposed_check:
+    label: Opposed Check
+    kind: opposed
+    default_check_id: stealth
+    default_difficulty: hard
+    success_effect: The investigator wins the immediate opposed exchange.
+    failure_effect: The opposing force gains position or pressure, but cannot create unlisted facts.
+    pushed_failure_effect: The pushed opposed attempt fails; the opposition gains a serious advantage.
+    keywords: [opposed, 对抗]
+checks:
+  spot_hidden:
+    label: Spot Hidden
+    kind: skill
+    source: spot_hidden
+    default: 60
+    procedure_id: skill_check
+    keywords: [observe, inspect, search, look, 观察, 搜索, 调查, 查看, 侦查]
+  library_use:
+    label: Library Use
+    kind: skill
+    source: library_use
+    default: 55
+    procedure_id: skill_check
+    keywords: [research, archive, books, records, 资料, 档案, 图书馆, 记录]
+  listen:
+    label: Listen
+    kind: skill
+    source: listen
+    default: 45
+    procedure_id: skill_check
+    keywords: [listen, sound, hear, 聆听, 声音, 听]
+  psychology:
+    label: Psychology
+    kind: skill
+    source: psychology
+    default: 40
+    procedure_id: skill_check
+    keywords: [read, motive, lie, 心理, 动机, 撒谎]
+  stealth:
+    label: Stealth
+    kind: skill
+    source: stealth
+    default: 40
+    procedure_id: opposed_check
+    keywords: [sneak, hide, quietly, 潜行, 躲, 悄悄]
+  persuade:
+    label: Persuade
+    kind: skill
+    source: persuade
+    default: 45
+    procedure_id: skill_check
+    keywords: [persuade, convince, calm, 说服, 劝, 安抚]
+  mechanical_repair:
+    label: Mechanical Repair
+    kind: skill
+    source: mechanical_repair
+    default: 50
+    procedure_id: skill_check
+    keywords: [repair, machine, radio, beacon, 修理, 机械, 无线电, 灯塔]
+  occult:
+    label: Occult
+    kind: skill
+    source: occult
+    default: 35
+    procedure_id: skill_check
+    keywords: [occult, ritual, symbol, 神秘, 仪式, 符号]
+  first_aid:
+    label: First Aid
+    kind: skill
+    source: first_aid
+    default: 45
+    procedure_id: skill_check
+    keywords: [first aid, bandage, 急救, 包扎]
+  int_check:
+    label: Intelligence
+    kind: attribute
+    source: int
+    default: 65
+    procedure_id: attribute_check
+    keywords: [deduce, logic, 推理, 分析]
+  dex_check:
+    label: Dexterity
+    kind: attribute
+    source: dex
+    default: 55
+    procedure_id: attribute_check
+    keywords: [dodge, balance, 闪避, 平衡]
+  luck:
+    label: Luck
+    kind: state
+    source: luck
+    default: 50
+    procedure_id: luck_check
+    keywords: [luck, chance, avoid, 幸运, 运气, 碰巧]
+  sanity:
+    label: Sanity
+    kind: state
+    source: sanity
+    default: 55
+    procedure_id: sanity_check
+    keywords: [sanity, horror, unnatural, 理智, 恐怖, 异常]
+result_bands:
+  failure: The check fails; use only the established procedure failure effect.
+  success: The check succeeds at regular level.
+  hard_success: The check succeeds at hard level and may reveal a stronger but still authorized benefit.
+  extreme_success: The check succeeds at extreme level and may reveal a precise clue or strong advantage.
+  critical_success: The check is a critical success; reward clarity without skipping required mystery steps.
+gm_constraints:
+  - Never ask the player to roll manually.
+  - Do not treat a pushed roll as free; failure must intensify an established cost.
+  - Sanity pressure changes mood and pressure clocks, not durable madness labels unless a scenario authorizes them.

@@ -54,6 +54,8 @@
   kind: turn
   description: Scenario-specific terms should be retrieved from content, not core prompt, and not leaked by the local narrator.
   input: 维加告诉我这个调频器怎么用
+  ruleset_id: lasers_feelings_smoke
+  scenario_id: crystal_stop_singing_smoke
   tags: [turn, retrieval, disclosure]
   expectation:
     intent_kind: info_query
@@ -66,6 +68,8 @@
   kind: turn
   description: Risky action fixtures should resolve through the loaded ruleset resolver.
   input: 风险行动
+  ruleset_id: lasers_feelings_smoke
+  scenario_id: crystal_stop_singing_smoke
   tags: [turn, tools]
   expectation:
     intent_kind: action
@@ -78,6 +82,8 @@
   kind: turn
   description: Turn graph should include a scenario director step before world patch application.
   input: 我检查中继站入口
+  ruleset_id: lasers_feelings_smoke
+  scenario_id: crystal_stop_singing_smoke
   tags: [turn, scenario, milestone-5]
   expectation:
     intent_kind: action
@@ -88,6 +94,8 @@
   kind: turn
   description: Turn graph should run critic and memory curation before persistence.
   input: 以后请简短回顾
+  ruleset_id: lasers_feelings_smoke
+  scenario_id: crystal_stop_singing_smoke
   tags: [turn, critic, memory, milestone-6, milestone-7]
   expectation:
     intent_kind: action
@@ -144,3 +152,30 @@
     decision: risky_action
     required_tool_names: [run_ruleset_resolver]
     output_not_contains: ["请掷骰", "please roll"]
+
+- id: turn-coc-light-repair-resolves
+  kind: turn
+  description: COC-light risky repair should resolve through the ruleset plugin.
+  input: 我修理灯塔无线电，尝试恢复玛拉最后的录音
+  ruleset_id: coc7_light_investigation
+  scenario_id: black_tide_beacon
+  tags: [turn, genericity, rules-plugin, coc-light]
+  expectation:
+    intent_kind: action
+    decision: risky_action
+    required_tool_names: [run_ruleset_resolver]
+    output_contains: ["判定结果"]
+    output_not_contains: ["请掷骰", "please roll"]
+
+- id: turn-coc-light-scenario-observation
+  kind: turn
+  description: Black Tide Beacon should use scenario context without leaking the hidden truth.
+  input: 我观察灯塔光束和守灯人小屋之间有什么异常
+  ruleset_id: coc7_light_investigation
+  scenario_id: black_tide_beacon
+  tags: [turn, genericity, scenario, coc-light]
+  expectation:
+    intent_kind: action
+    decision: free_action
+    required_trace_nodes: [direct_scenario_with_llm, apply_world_patch_results]
+    output_not_contains: ["meteorite", "sea-mind", "陨石", "海下"]

@@ -29,6 +29,19 @@ scenes:
     public_summary: >
       The antenna is half torn from its mount, rainwater runs toward exposed cables, and the stairwell
       door keeps slamming open.
+    visible_surfaces:
+      - id: torn_antenna
+        text: The antenna is half torn from its mount in the gale.
+        tags: [observation, hazard, antenna]
+        one_shot: true
+      - id: exposed_cables
+        text: Rainwater runs toward exposed cables across the roof.
+        tags: [observation, hazard, cables]
+        one_shot: true
+      - id: slamming_stairwell
+        text: The stairwell door keeps slamming open under the force of the wind.
+        tags: [observation, route, shelter]
+        one_shot: true
     gm_only:
       - The antenna can be stabilized before evacuation.
       - The exposed cable will short if the storm clock reaches three.
@@ -46,6 +59,15 @@ scenes:
     public_summary: >
       The generator coughs under flickering lights. Backup batteries line one wall, each marked with
       a fading charge indicator.
+    visible_surfaces:
+      - id: coughing_generator
+        text: The generator coughs under flickering lights.
+        tags: [observation, system, pressure]
+        one_shot: true
+      - id: fading_batteries
+        text: Backup batteries line one wall, each marked with a fading charge indicator.
+        tags: [observation, resource, evacuation]
+        one_shot: true
     gm_only:
       - One battery is enough for evacuation beacons.
       - Full station recovery requires two successes or a clever tradeoff.

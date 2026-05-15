@@ -1,0 +1,26 @@
+schema_version: 1
+id: coc7_light_investigation
+kind: ruleset
+name: COC7 Light Investigation
+description: Original simplified percentile investigation-horror rules for genericity tests.
+version: 0.1.0
+entrypoint: rules.md
+visibility:
+  default: public
+references:
+  - id: source_rules
+    title: COC7 light investigation rules
+    path: rules.md
+    visibility: public
+    tags: [rules, investigation, horror]
+  - id: compiled_rules
+    title: Compiled COC7 light rules
+    path: compiled.yaml
+    visibility: tool_only
+    tags: [compiled, rules]
+  - id: rules_plugin
+    title: COC7 light rules plugin
+    path: plugin.yaml
+    visibility: tool_only
+    tags: [plugin, rules]
+tests: []

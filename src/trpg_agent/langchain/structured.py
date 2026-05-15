@@ -138,6 +138,10 @@ class RulesAdjudicationAdvice(BaseModel):
     requires_resolution: bool
     procedure_id: str | None = None
     approach_id: str | None = None
+    check_id: str | None = None
+    difficulty: str | None = None
+    modifier: str | None = None
+    pushed: bool = False
     risk: Literal["none", "low", "risky_uncertain", "high"] = "risky_uncertain"
     stakes: str
     clarification_question: str | None = None
@@ -157,6 +161,14 @@ class ScenarioDirectorDecision(BaseModel):
     proposed_patches: list[dict] = Field(default_factory=list)
     player_visible_context: str
     gm_only_reason: str
+    citations: list[str] = Field(default_factory=list)
+
+
+class ScenarioSurfaceSelectorDecision(BaseModel):
+    decision: Literal["select", "fallback"]
+    surface_id: str | None = None
+    fallback_to_full_director: bool = False
+    reason: str
     citations: list[str] = Field(default_factory=list)
 
 
@@ -247,6 +259,10 @@ class RulesAdviceWire(BaseModel):
     resolve: bool = False
     proc: str | None = Field(default=None, max_length=80)
     approach: str | None = Field(default=None, max_length=80)
+    check: str | None = Field(default=None, max_length=80)
+    diff: str | None = Field(default=None, max_length=40)
+    mod: str | None = Field(default=None, max_length=40)
+    pushed: bool = False
     risk: Literal["none", "low", "risky_uncertain", "high"] = "none"
     stakes: str = Field(default="", max_length=220)
     clarify: str | None = Field(default=None, max_length=220)
@@ -403,6 +419,7 @@ COMPACT_RESPONSE_CONTRACTS: dict[str, str] = {
     ),
     "RulesAdviceWire": (
         '{"resolve": bool, "proc": null|string, "approach": null|string, '
+        '"check": null|string, "diff": null|string, "mod": null|string, "pushed": bool, '
         '"risk": none|low|risky_uncertain|high, "stakes": "<=220 chars", '
         '"clarify": null|string, "refs": []}'
     ),
@@ -563,6 +580,10 @@ def _adapt_rules_advice(wire: RulesAdviceWire) -> RulesAdjudicationAdvice:
         requires_resolution=wire.resolve,
         procedure_id=wire.proc,
         approach_id=wire.approach,
+        check_id=wire.check,
+        difficulty=wire.diff,
+        modifier=wire.mod,
+        pushed=wire.pushed,
         risk=wire.risk if wire.resolve else wire.risk,
         stakes=wire.stakes or ("Resolution needed." if wire.resolve else "No risky uncertainty."),
         clarification_question=wire.clarify,

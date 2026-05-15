@@ -17,6 +17,7 @@ from trpg_agent.langchain.structured import (
     RiskMicroGateDecision,
     RulesAdjudicationAdvice,
     ScenarioDirectorDecision,
+    ScenarioSurfaceSelectorDecision,
     SingleTurnAdvisorDecision,
     TargetMicroGateDecision,
     adapt_compact_output,
@@ -57,6 +58,7 @@ def test_advisor_specs_cover_expected_roles() -> None:
         "memory_recall_micro_gate",
         "rules_adjudicator",
         "scenario_director",
+        "scenario_surface_selector",
         "single_turn_advisor",
         "memory_curator",
         "critic_guardrail",
@@ -143,6 +145,15 @@ def test_advisor_structured_contracts_validate() -> None:
             "player_visible_context": "Pressure increases in a visible way.",
             "gm_only_reason": "The scenario clock advances after delay.",
             "citations": ["scenario:clock"],
+        }
+    )
+    ScenarioSurfaceSelectorDecision.model_validate(
+        {
+            "decision": "select",
+            "surface_id": "visible_surface",
+            "fallback_to_full_director": False,
+            "reason": "A listed visible surface matches the player's observation.",
+            "citations": ["scenario:visible_surface"],
         }
     )
     SingleTurnAdvisorDecision.model_validate(
@@ -295,7 +306,7 @@ def test_invoke_advisor_parses_structured_output() -> None:
     assert isinstance(result.output, IntentRoutingDecision)
     assert result.output.needs_rules_resolution is True
     assert result.trace_metadata["advisor_role"] == "intent_arbiter"
-    assert result.trace_metadata["prompt_version"] == "intent-arbiter-v6"
+    assert result.trace_metadata["prompt_version"] == "intent-arbiter-v7"
     assert result.trace_metadata["schema"] == "IntentRoutingDecision"
     assert result.trace_metadata["cached"] == "false"
     assert int(result.trace_metadata["elapsed_ms"]) >= 0

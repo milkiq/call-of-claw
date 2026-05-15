@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from trpg_agent.app.config import AppConfig
 from trpg_agent.eval.scorecard import EvalFinding, EvalResult, score_from_findings
+from trpg_agent.eval.session_cleanup import cleanup_metadata, cleanup_sessions
 from trpg_agent.graph.build_turn_graph import TURN_GRAPH_VERSION
 from trpg_agent.graph.runtime import durable_turn_graph, invoke_turn_graph
 from trpg_agent.memory.store import SqliteStore
@@ -73,6 +74,7 @@ def run_scripted_long_play(
     ruleset_id: str | None = None,
     scenario_id: str | None = None,
     persist: bool = True,
+    cleanup_session: bool = False,
 ) -> EvalResult:
     """Run a deterministic local long-play smoke test through the durable graph."""
 
@@ -145,6 +147,16 @@ def run_scripted_long_play(
             **metrics.to_metadata(),
         },
     )
+    if cleanup_session:
+        result.metadata.update(
+            cleanup_metadata(
+                cleanup_sessions(
+                    store=store,
+                    sqlite_path=config.sqlite_path,
+                    session_ids=[play_session_id],
+                )
+            )
+        )
     if persist:
         store.insert_eval_run(run_id=result.run_id, kind=result.kind, payload=result.model_dump())
     return result

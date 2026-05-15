@@ -13,6 +13,7 @@ from trpg_agent.app.config import AppConfig
 from trpg_agent.eval.judge import run_llm_judge
 from trpg_agent.eval.playtest import collect_playtest_metrics
 from trpg_agent.eval.scorecard import EvalFinding, EvalResult, score_from_findings
+from trpg_agent.eval.session_cleanup import cleanup_metadata, cleanup_sessions
 from trpg_agent.graph.build_turn_graph import TURN_GRAPH_VERSION
 from trpg_agent.graph.runtime import durable_turn_graph, invoke_turn_graph
 from trpg_agent.langchain.structured import invoke_structured_with_repair
@@ -69,6 +70,7 @@ def run_online_playtest(
     runtime_budget_profile: str | None = None,
     single_turn_advisor: bool = False,
     micro_gates: bool = False,
+    conditional_advisors: bool = False,
     parallel_review: bool = False,
     advisor_contracts: Literal["legacy", "compact"] = "legacy",
     session_id: str | None = None,
@@ -76,6 +78,7 @@ def run_online_playtest(
     scenario_id: str | None = None,
     output_dir: Path | None = None,
     model_metadata: dict[str, str] | None = None,
+    cleanup_session: bool = True,
 ) -> EvalResult:
     model = _model_with_timeout(model, per_call_timeout_seconds)
     store = SqliteStore(config.sqlite_path)
@@ -128,6 +131,7 @@ def run_online_playtest(
                     "eval_smoke_mode": smoke_fast_path,
                     "single_turn_advisor_mode": single_turn_advisor,
                     "micro_gates_mode": micro_gates,
+                    "conditional_advisors_mode": conditional_advisors,
                     "parallel_review_mode": parallel_review,
                     "advisor_contract_mode": advisor_contracts,
                     "model_metadata": model_metadata or {},
@@ -169,6 +173,7 @@ def run_online_playtest(
                 "eval_smoke_mode": smoke_fast_path,
                 "single_turn_advisor_mode": single_turn_advisor,
                 "micro_gates_mode": micro_gates,
+                "conditional_advisors_mode": conditional_advisors,
                 "parallel_review_mode": parallel_review,
                 "advisor_contract_mode": advisor_contracts,
                 "model_metadata": model_metadata or {},
@@ -246,6 +251,7 @@ def run_online_playtest(
             "play_profile": profile,
             "single_turn_advisor": str(single_turn_advisor),
             "micro_gates": str(micro_gates),
+            "conditional_advisors": str(conditional_advisors),
             "parallel_review": str(parallel_review),
             "advisor_contracts": advisor_contracts,
             "per_call_timeout_seconds": str(per_call_timeout_seconds or ""),
@@ -265,10 +271,31 @@ def run_online_playtest(
                 runtime_summary.get("advisor_timeout_count", 0)
             ),
             "runtime_node_count": str(runtime_summary.get("node_count", 0)),
+            "scenario_fast_path_count": str(
+                runtime_summary.get("scenario_fast_path_count", 0)
+            ),
+            "scenario_full_director_count": str(
+                runtime_summary.get("scenario_full_director_count", 0)
+            ),
+            "conditional_skip_reasons": json.dumps(
+                runtime_summary.get("advisor_skip_reasons", {}),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
             **(model_metadata or {}),
             **metrics.to_metadata(),
         },
     )
+    if cleanup_session:
+        result.metadata.update(
+            cleanup_metadata(
+                cleanup_sessions(
+                    store=store,
+                    sqlite_path=config.sqlite_path,
+                    session_ids=[play_session_id],
+                )
+            )
+        )
     transcript_path.write_text(
         _transcript_markdown(
             run_id=run_id,
@@ -501,6 +528,7 @@ def _trace_entry_from_result(turn_number: int, result: dict[str, Any]) -> dict[s
         "micro_gate_results": result.get("micro_gate_results", {}),
         "turn_plan": result.get("turn_plan", {}),
         "tool_results": result.get("tool_results", []),
+        "scenario_surface_selector": result.get("scenario_surface_selector", {}),
         "world_projection": result.get("world_projection", {}),
         "critic_report": result.get("critic_report", {}),
     }
@@ -558,6 +586,8 @@ def _runtime_summary_from_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
         if profile.get("budget_profile"):
             budget_profile = str(profile.get("budget_profile"))
             break
+    node_counts = _trace_node_counts(trace)
+    skip_reasons = _advisor_skip_reason_counts(trace)
     return {
         "budget_profile": budget_profile,
         "turn_count": len(profiles),
@@ -572,7 +602,37 @@ def _runtime_summary_from_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
         "category_node_count": category_node_count,
         "slowest_nodes": slow_nodes,
         "slowest_nodes_text": _runtime_slowest_nodes_text(slow_nodes),
+        "scenario_fast_path_count": node_counts.get("select_scenario_surface_with_llm", 0),
+        "scenario_full_director_count": node_counts.get("direct_scenario_with_llm", 0),
+        "advisor_skip_reasons": skip_reasons,
     }
+
+
+def _trace_node_counts(trace: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in trace:
+        for event in entry.get("trace_events", []):
+            if not isinstance(event, dict):
+                continue
+            node = str(event.get("node") or "")
+            if node:
+                counts[node] = counts.get(node, 0) + 1
+    return counts
+
+
+def _advisor_skip_reason_counts(trace: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in trace:
+        for event in entry.get("trace_events", []):
+            if not isinstance(event, dict):
+                continue
+            skip_reasons = event.get("advisor_skip_reasons")
+            if not isinstance(skip_reasons, dict):
+                continue
+            for advisor, reason in skip_reasons.items():
+                key = f"{advisor}:{reason}"
+                counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _runtime_slowest_nodes_text(slow_nodes: list[dict[str, Any]]) -> str:

@@ -22,6 +22,7 @@ ADVISOR_CONTEXT_TARGETS: dict[str, int] = {
     "rules_adjudicator": 8_000,
     "core_gm": 10_000,
     "scenario_director": 10_000,
+    "scenario_surface_selector": 3_000,
     "critic_guardrail": 12_000,
     "memory_curator": 8_000,
     "narrator": 9_000,
@@ -107,6 +108,19 @@ ROLE_CONTEXT_POLICIES: dict[str, ContextPolicy] = {
         ),
         allowed_visibility=("public", "revealed", "gm_only"),
         mandatory_buckets=("scenario_spans", "turn_plan_summary", "tool_result_summaries"),
+    ),
+    "scenario_surface_selector": ContextPolicy(
+        role="scenario_surface_selector",
+        max_chars=3_000,
+        allowed_buckets=(
+            "ids",
+            "surface_candidates",
+            "world_summary",
+            "routing_decision",
+            "turn_plan_summary",
+        ),
+        allowed_visibility=("public", "revealed"),
+        mandatory_buckets=("surface_candidates", "routing_decision", "turn_plan_summary"),
     ),
     "narrator": ContextPolicy(
         role="narrator",
@@ -439,6 +453,15 @@ def _legacy_role_context(
             "package_profiles": state.get("package_profiles", []),
             "advisor_contract": advisor_contract,
         }
+    if role == "scenario_surface_selector":
+        return {
+            **base_ids,
+            "surface_candidates": extra_context.get("surface_candidates", []),
+            "world_summary": _world_summary(state.get("world_projection", {})),
+            "routing_decision": state.get("routing_decision", {}),
+            "turn_plan": state.get("turn_plan", {}),
+            "advisor_contract": advisor_contract,
+        }
     if role == "narrator":
         return {
             **base_ids,
@@ -630,6 +653,7 @@ def _world_summary(world: Any) -> dict[str, Any]:
             "id": scene.get("id"),
             "title": scene.get("title"),
             "public_summary": _clip_text(scene.get("public_summary"), 700),
+            "visible_surfaces": _clip_json(scene.get("visible_surfaces", []), 900),
             "transitions": _clip_json(scene.get("transitions", []), 900),
         }
     return summary

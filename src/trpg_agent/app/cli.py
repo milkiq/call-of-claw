@@ -22,9 +22,15 @@ except ImportError:  # pragma: no cover - exercised only when dependency is miss
     InMemoryHistory = None
 
 from trpg_agent.app.config import load_config
-from trpg_agent.content.compiled import load_compiled_ruleset
+from trpg_agent.content.compiled import load_compiled_ruleset, load_compiled_scenario
+from trpg_agent.content.compiler import (
+    compile_content_draft,
+    draft_to_json,
+    write_content_draft,
+)
 from trpg_agent.content.packages import PackageKind
 from trpg_agent.content.registry import ContentRegistry
+from trpg_agent.content.retrieval import warm_content_index
 from trpg_agent.eval.advisor_metrics import compare_advisor_metrics, summarize_advisor_metrics
 from trpg_agent.eval.judge import run_llm_judge, run_static_quality_gate
 from trpg_agent.eval.live import run_live_eval
@@ -36,6 +42,7 @@ from trpg_agent.eval.report import build_quality_report_from_store
 from trpg_agent.eval.roadmap import derive_roadmap_from_store, write_roadmap_yaml
 from trpg_agent.eval.runner import run_eval_cases
 from trpg_agent.eval.scorecard import EvalFinding, EvalResult, score_from_findings
+from trpg_agent.eval.session_cleanup import cleanup_known_test_sessions, is_test_session_id
 from trpg_agent.graph.runtime import (
     delete_turn_graph_checkpoints,
     durable_turn_graph,
@@ -47,6 +54,7 @@ from trpg_agent.langchain.structured import invoke_structured_with_repair
 from trpg_agent.langchain.tracing import configure_langsmith
 from trpg_agent.memory.canon import import_canon_jsonl
 from trpg_agent.memory.store import SqliteStore
+from trpg_agent.rules.plugin_runtime import load_rules_plugin
 from trpg_agent.scenario.runtime import start_session
 from trpg_agent.tools.dice import roll_dice_once
 
@@ -65,6 +73,7 @@ class PlayProfileConfig:
     use_llm: bool
     micro_gates: bool
     single_turn_advisor: bool
+    conditional_advisors: bool
     parallel_review: bool
     advisor_contracts: str
     runtime_budget_profile: str
@@ -77,6 +86,7 @@ PLAY_PROFILE_DEFAULTS: dict[str, PlayProfileConfig] = {
         use_llm=True,
         micro_gates=False,
         single_turn_advisor=False,
+        conditional_advisors=False,
         parallel_review=False,
         advisor_contracts="legacy",
         runtime_budget_profile="balanced",
@@ -87,6 +97,7 @@ PLAY_PROFILE_DEFAULTS: dict[str, PlayProfileConfig] = {
         use_llm=True,
         micro_gates=False,
         single_turn_advisor=False,
+        conditional_advisors=True,
         parallel_review=True,
         advisor_contracts="legacy",
         runtime_budget_profile="fast",
@@ -97,6 +108,7 @@ PLAY_PROFILE_DEFAULTS: dict[str, PlayProfileConfig] = {
         use_llm=True,
         micro_gates=False,
         single_turn_advisor=False,
+        conditional_advisors=False,
         parallel_review=False,
         advisor_contracts="legacy",
         runtime_budget_profile="theatrical",
@@ -118,6 +130,7 @@ GRAPH_PROGRESS_LABELS = {
     "ensure_resolution_tools": "准备规则工具",
     "execute_deterministic_tools": "执行规则工具 / 掷骰",
     "direct_scenario_locally": "判断场景推进",
+    "select_scenario_surface_with_llm": "选择可见场景信息",
     "direct_scenario_with_llm": "判断场景推进",
     "apply_world_patch_results": "应用已验证场景变化",
     "emit_turn_output": "生成 GM 回复",
@@ -232,6 +245,65 @@ def content_check() -> None:
     console.print(f"[green]content OK[/green]: {len(registry.packages)} package(s)")
 
 
+@content_app.command("compile")
+def content_compile(
+    kind: Annotated[str, typer.Option("--kind")] = "ruleset",
+    source: Annotated[Path, typer.Option("--source")] = Path("rules.md"),
+    package_id: Annotated[str, typer.Option("--package-id")] = "compiled_package",
+    output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
+    write: Annotated[bool, typer.Option("--write")] = False,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Compile a ruleset or scenario source document into package files."""
+    if kind not in {"ruleset", "scenario"}:
+        console.print("[red]--kind must be ruleset or scenario.[/red]")
+        raise typer.Exit(2)
+    if not source.exists():
+        console.print(f"[red]source not found:[/red] {source}")
+        raise typer.Exit(2)
+    config = load_config()
+    model_config = load_model_config(config.root_dir / "llm.config.json")
+    configure_langsmith(
+        config,
+        {
+            **{key: str(value) for key, value in describe_model(model_config).items()},
+            "content_compile_kind": kind,
+            "package_id": package_id,
+        },
+    )
+    model = build_chat_model(model_config)
+    try:
+        draft = compile_content_draft(
+            model=model,
+            kind="ruleset" if kind == "ruleset" else "scenario",
+            package_id=package_id,
+            source=source.read_text(encoding="utf-8"),
+        )
+        package_dir = None
+        if write:
+            base_dir = output_dir or (
+                config.content_dir / ("rulesets" if kind == "ruleset" else "scenarios")
+            )
+            package_dir = write_content_draft(
+                kind="ruleset" if kind == "ruleset" else "scenario",
+                package_id=package_id,
+                draft=draft,
+                output_dir=base_dir,
+                force=force,
+            )
+    except Exception as error:
+        console.print(f"[red]content compile failed:[/red] {error}")
+        raise typer.Exit(1) from error
+    if json_output:
+        typer.echo(draft_to_json(draft))
+        return
+    if package_dir:
+        console.print(f"wrote package: {package_dir}", markup=False)
+    else:
+        console.print(draft_to_json(draft), markup=False)
+
+
 @memory_app.command("import-canon")
 def memory_import_canon(
     path: Annotated[Path, typer.Argument()] = Path("seeds/canon-log.jsonl"),
@@ -322,6 +394,10 @@ def eval_live(
     min_score: Annotated[int, typer.Option("--min-score")] = 3,
     session_prefix: Annotated[str, typer.Option("--session-prefix")] = "live-eval",
     case_path: Annotated[Path | None, typer.Option("--case-path")] = None,
+    keep_session: Annotated[
+        bool,
+        typer.Option("--keep-session", help="Keep live eval sessions for manual inspection."),
+    ] = False,
 ) -> None:
     """Run live play turns and LLM-as-judge quality evaluation."""
     config = load_config()
@@ -342,6 +418,7 @@ def eval_live(
             min_score=min_score,
             session_prefix=session_prefix,
             case_path=case_path,
+            cleanup_session=not keep_session,
             model_metadata={key: str(value) for key, value in describe_model(model_config).items()},
         )
     except Exception as error:
@@ -383,6 +460,7 @@ def eval_all(
             model,
             limit=live_limit,
             min_score=min_score,
+            cleanup_session=True,
             model_metadata={key: str(value) for key, value in describe_model(model_config).items()},
         )
     except Exception as error:
@@ -478,6 +556,10 @@ def eval_long_play(
     session_id: Annotated[str | None, typer.Option("--session-id")] = None,
     ruleset_id: Annotated[str | None, typer.Option("--ruleset-id")] = None,
     scenario_id: Annotated[str | None, typer.Option("--scenario-id")] = None,
+    keep_session: Annotated[
+        bool,
+        typer.Option("--keep-session", help="Keep the generated long-play session."),
+    ] = False,
 ) -> None:
     """Run a deterministic long-play durability and coherence smoke test."""
     config = load_config()
@@ -487,6 +569,7 @@ def eval_long_play(
         session_id=session_id,
         ruleset_id=ruleset_id,
         scenario_id=scenario_id,
+        cleanup_session=not keep_session,
     )
     console.print(result.to_console_text())
     if result.failed:
@@ -518,6 +601,10 @@ def eval_online_playtest(
     ruleset_id: Annotated[str | None, typer.Option("--ruleset-id")] = None,
     scenario_id: Annotated[str | None, typer.Option("--scenario-id")] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
+    keep_session: Annotated[
+        bool,
+        typer.Option("--keep-session", help="Keep the generated online playtest session."),
+    ] = False,
 ) -> None:
     """Run an online GM long-play test and write the full transcript."""
     config = load_config()
@@ -560,6 +647,7 @@ def eval_online_playtest(
             runtime_budget_profile=profile_config.runtime_budget_profile,
             single_turn_advisor=profile_config.single_turn_advisor,
             micro_gates=profile_config.micro_gates,
+            conditional_advisors=profile_config.conditional_advisors,
             parallel_review=profile_config.parallel_review,
             advisor_contracts=profile_config.advisor_contracts,
             session_id=session_id,
@@ -567,6 +655,7 @@ def eval_online_playtest(
             scenario_id=scenario_id,
             output_dir=output_dir,
             model_metadata=model_metadata,
+            cleanup_session=not keep_session,
         )
     except Exception as error:
         console.print(f"[red]online playtest failed:[/red] {error}")
@@ -599,7 +688,12 @@ def eval_release_gates(
         )
 
     local_result = run_eval_cases(config, kind="release-offline", persist=False)
-    long_play = run_scripted_long_play(config, turns=long_play_turns, persist=False)
+    long_play = run_scripted_long_play(
+        config,
+        turns=long_play_turns,
+        persist=False,
+        cleanup_session=True,
+    )
     findings.extend(local_result.findings)
     findings.extend(long_play.findings)
     total = 1 + local_result.total + long_play.total
@@ -795,6 +889,46 @@ def session_delete(
     )
 
 
+@session_app.command("cleanup-tests")
+def session_cleanup_tests(
+    yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Delete known eval/playtest sessions while preserving eval runs and exports."""
+    config = load_config()
+    store = SqliteStore(config.sqlite_path)
+    store.migrate()
+    targets = [
+        str(session["id"])
+        for session in store.list_session_summaries()
+        if is_test_session_id(str(session["id"]))
+    ]
+    if not targets:
+        payload = {"deleted": False, "reason": "no known test sessions"}
+        if json_output:
+            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            console.print("No known test sessions to delete.", markup=False)
+        return
+    if not yes:
+        confirmed = typer.confirm(
+            f"Delete {len(targets)} known test sessions and checkpoint data?",
+            default=False,
+        )
+        if not confirmed:
+            raise typer.Exit(1)
+    cleanup = cleanup_known_test_sessions(store=store, sqlite_path=config.sqlite_path)
+    payload = {"deleted": True, **cleanup}
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    console.print(
+        f"Deleted {len(cleanup.get('session_ids', []))} known test sessions.",
+        markup=False,
+    )
+    console.print(json.dumps(cleanup, ensure_ascii=False, indent=2), markup=False)
+
+
 @session_app.command("recap")
 def session_recap(
     session_id: Annotated[str, typer.Option("--session-id")] = "default",
@@ -981,6 +1115,30 @@ def _build_play_model(
     return build_chat_model(model_config), model_metadata
 
 
+def _build_play_runtime_preload(
+    *,
+    registry: ContentRegistry,
+    sqlite_path: Path,
+    ruleset_id: str,
+    scenario_id: str,
+) -> dict[str, Any]:
+    active_ids = registry.resolve_active_package_ids([ruleset_id, scenario_id])
+    ruleset = load_compiled_ruleset(registry, ruleset_id)
+    scenario = load_compiled_scenario(registry, scenario_id)
+    plugin = load_rules_plugin(registry, ruleset_id)
+    index_status = warm_content_index(registry, sqlite_path=sqlite_path)
+    return {
+        "ruleset_id": ruleset_id,
+        "scenario_id": scenario_id,
+        "active_package_ids": active_ids,
+        "package_profiles": registry.package_profiles(active_ids),
+        "compiled_ruleset": ruleset.model_dump(),
+        "compiled_scenario": scenario.model_dump(),
+        "rules_plugin": plugin.model_dump() if plugin is not None else None,
+        "content_index": index_status,
+    }
+
+
 def _run_play_turn(
     graph: Any,
     *,
@@ -992,6 +1150,7 @@ def _run_play_turn(
     sqlite_path: Path,
     profile_config: PlayProfileConfig,
     model_metadata: dict[str, str],
+    runtime_preload: dict[str, Any] | None = None,
     progress: GraphProgressReporter | None = None,
 ) -> dict[str, Any]:
     state = {
@@ -1008,11 +1167,14 @@ def _run_play_turn(
         "context_budget_mode": profile_config.context_budget_mode,
         "micro_gates_mode": profile_config.micro_gates,
         "single_turn_advisor_mode": profile_config.single_turn_advisor,
+        "conditional_advisors_mode": profile_config.conditional_advisors,
         "parallel_review_mode": profile_config.parallel_review,
         "advisor_contract_mode": profile_config.advisor_contracts,
         "checkpoint_mode": "sqlite",
         "model_metadata": model_metadata,
     }
+    if runtime_preload:
+        state["runtime_preload"] = runtime_preload
     if progress is not None and progress.enabled:
         return stream_turn_graph(graph, state, on_node=progress.update)
     return invoke_turn_graph(graph, state)
@@ -1065,6 +1227,12 @@ def _run_interactive_play_loop(
         config=config,
         profile_config=profile_config,
         session_id=resolved_session_id,
+        ruleset_id=selected_ruleset,
+        scenario_id=selected_scenario,
+    )
+    runtime_preload = _build_play_runtime_preload(
+        registry=registry,
+        sqlite_path=config.sqlite_path,
         ruleset_id=selected_ruleset,
         scenario_id=selected_scenario,
     )
@@ -1151,6 +1319,7 @@ def _run_interactive_play_loop(
                         sqlite_path=config.sqlite_path,
                         profile_config=profile_config,
                         model_metadata=model_metadata,
+                        runtime_preload=runtime_preload,
                         progress=reporter,
                     )
             except Exception as error:
@@ -1280,6 +1449,7 @@ def _resolve_play_profile(
             use_llm=False,
             micro_gates=False,
             single_turn_advisor=False,
+            conditional_advisors=False,
             parallel_review=False,
             advisor_contracts="legacy",
             context_budget_mode="shadow",
@@ -1296,6 +1466,7 @@ def _profile_metadata(profile_config: PlayProfileConfig) -> dict[str, str]:
         "use_llm": str(profile_config.use_llm),
         "micro_gates": str(profile_config.micro_gates),
         "single_turn_advisor": str(profile_config.single_turn_advisor),
+        "conditional_advisors": str(profile_config.conditional_advisors),
         "parallel_review": str(profile_config.parallel_review),
         "advisor_contracts": profile_config.advisor_contracts,
     }
@@ -1462,10 +1633,24 @@ def _apply_character_creation(
         source_value = _mechanical_source_value(assignment, spec, fields, answers)
         value = _coerce_mechanical_value(assignment, source_value)
         if value is not None:
-            character_context[assignment.field] = value
+            _set_nested_character_value(character_context, str(assignment.field), value)
             player_character[assignment.field] = value
     character_context["player_character"] = player_character
     return player_character, character_context
+
+
+def _set_nested_character_value(target: dict[str, Any], field: str, value: Any) -> None:
+    parts = [part for part in field.split(".") if part]
+    if not parts:
+        return
+    cursor = target
+    for part in parts[:-1]:
+        nested = cursor.setdefault(part, {})
+        if not isinstance(nested, dict):
+            nested = {}
+            cursor[part] = nested
+        cursor = nested
+    cursor[parts[-1]] = value
 
 
 def _mechanical_source_value(
@@ -1603,6 +1788,12 @@ def play(
         ruleset_id=selected_ruleset,
         scenario_id=selected_scenario,
     )
+    runtime_preload = _build_play_runtime_preload(
+        registry=registry,
+        sqlite_path=config.sqlite_path,
+        ruleset_id=selected_ruleset,
+        scenario_id=selected_scenario,
+    )
     try:
         with durable_turn_graph(sqlite_path=config.sqlite_path, model=model) as graph:
             with GraphProgressReporter(enabled=progress and not json_output) as reporter:
@@ -1616,6 +1807,7 @@ def play(
                     sqlite_path=config.sqlite_path,
                     profile_config=profile_config,
                     model_metadata=model_metadata,
+                    runtime_preload=runtime_preload,
                     progress=reporter,
                 )
     except Exception as error:

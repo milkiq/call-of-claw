@@ -26,6 +26,7 @@ Advisor trace metadata includes:
 - prompt version;
 - schema name;
 - advisor contract mode;
+- advisor skip reasons;
 - cache status.
 
 These metrics are coarse and provider-independent. They are intended for trend analysis and
@@ -91,10 +92,19 @@ preserve advisor contracts, prompt versions, trace metadata, and deterministic t
 
 `trpg play` exposes `--profile fast|balanced|theatrical` as the normal user-facing runtime choice.
 The default `balanced` profile uses the stable multi-advisor path and shadow context budgeting.
-`fast` uses the stable multi-advisor path with legacy contracts, parallel review, enforced context
-budgeting, and the fast latency budget. `theatrical` preserves the stable path with shadow context
-budgeting and the theatrical latency budget for future style work. Use `--local` for the no-model
-structural debug fallback.
+`fast` uses the stable multi-advisor path with conditional low-risk advisor skips, legacy contracts,
+parallel review, enforced context budgeting, and the fast latency budget. The conditional fast path
+may skip the core GM planner when structured routing already proves a direct low-risk answer or
+free action, may use a narrow scenario surface selector for package-authorized visible observation
+details, may skip scenario direction when programmatic runtime checks or structured routing say it
+is unnecessary, and may use local critic/memory review when no tool result, resolver result,
+scenario patch, hidden-content risk, or pending rules opportunity is present. The surface selector
+can only choose ids from the active scene's compiled `visible_surfaces`; invalid, uncertain, or
+consequential selections fall back to the full scenario director. If the optional selector call
+itself returns malformed output, fast mode may recover with the first package-authorized visible
+surface and records `selector_error` in trace without treating it as a safety fallback.
+`theatrical` preserves the stable path with shadow context budgeting and the theatrical latency
+budget for future style work. Use `--local` for the no-model structural debug fallback.
 
 Online eval accepts the same `--profile` and still exposes explicit experiment flags for A/B
 reproduction. Reports must record both the selected profile and resolved graph flags.

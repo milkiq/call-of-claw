@@ -33,16 +33,18 @@ def _routing_response(
     route: str = "free_action",
     intent_kind: str = "action",
     needs_rules_resolution: bool = False,
+    needs_scenario_director: bool = True,
     allow_direct_answer: bool = False,
 ) -> str:
     needs_rules_json = "true" if needs_rules_resolution else "false"
+    needs_scenario_json = "true" if needs_scenario_director else "false"
     allow_direct_json = "true" if allow_direct_answer else "false"
     return f"""
     {{
       "intent": {{"kind": "{intent_kind}", "confidence": 0.9, "reason": "routed"}},
       "route": "{route}",
       "needs_rules_resolution": {needs_rules_json},
-      "needs_scenario_director": true,
+      "needs_scenario_director": {needs_scenario_json},
       "needs_memory_recall": false,
       "allow_direct_answer": {allow_direct_json},
       "reasoning_summary": "Generic routing decision.",
@@ -505,6 +507,395 @@ def test_micro_gates_adjudication_skips_core_gm_plan_call() -> None:
     assert result["trace_events"][-1]["short_circuit"] == "micro_gates_local_turn_plan"
 
 
+def test_conditional_advisors_direct_plan_skips_core_gm_and_llm_review() -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(
+                route="answer",
+                intent_kind="info_query",
+                needs_scenario_director=False,
+                allow_direct_answer=True,
+            ),
+            """
+            {
+              "final_text": "你看见中继站外壳和漂浮的逃生艇，没有新的危险立刻出现。",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "我观察当前处境",
+            "conditional_advisors_mode": True,
+            "context_budget_mode": "enforced",
+            "trace_events": [],
+        }
+    )
+
+    nodes = [event["node"] for event in result["trace_events"]]
+    assert "plan_turn_from_routing" in nodes
+    assert "adjudicate_with_llm" not in nodes
+    assert "direct_scenario_with_llm" in nodes
+    assert "critic_guardrail_with_llm" not in nodes
+    assert "curate_memory_with_llm" not in nodes
+    assert "critic_guardrail_locally" in nodes
+    assert "curate_memory_locally" in nodes
+    assert result["advisor_skip_reasons"]["core_gm"] == "conditional_direct_plan"
+    assert result["advisor_skip_reasons"]["scenario_director"] == "no_durable_runtime"
+    assert result["advisor_skip_reasons"]["critic_guardrail"] == (
+        "low_risk_no_tools_no_validated_patches"
+    )
+    assert result["advisor_skip_reasons"]["memory_curator"] == "no_durable_event"
+
+
+def test_conditional_advisors_keep_risky_actions_on_full_path() -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(route="risky_action", needs_rules_resolution=True),
+            _rules_advice_response(approach_id="lasers"),
+            """
+            {
+              "intent": {"kind": "action", "confidence": 0.9, "reason": "risky"},
+              "authority": {"ok": true, "reason": "grounded"},
+              "decision": "risky_action",
+              "tool_requests": [],
+              "narration_brief": "Resolve through loaded rules.",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "final_text": "The resolver result is narrated.",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "I force the hatch open",
+            "conditional_advisors_mode": True,
+            "ruleset_id": "lasers_feelings_smoke",
+            "turn_id": "conditional-risky-turn",
+        }
+    )
+
+    nodes = [event["node"] for event in result["trace_events"]]
+    assert "adjudicate_with_llm" in nodes
+    assert "plan_turn_from_routing" not in nodes
+    assert result["tool_results"][0]["tool_name"] == "run_ruleset_resolver"
+
+
+def test_conditional_surface_selector_skips_full_scenario_director(tmp_path) -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(
+                route="answer",
+                intent_kind="info_query",
+                needs_scenario_director=True,
+                allow_direct_answer=True,
+            ),
+            """
+            {
+              "decision": "select",
+              "surface_id": "station_cut_marks",
+              "fallback_to_full_director": false,
+              "reason": "The player is observing the station exterior.",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "final_text": "你看到中继站外壳有清晰的切割痕迹，像是近期被外力打开过。",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+            """
+            {
+              "ok": true,
+              "blocks_output": false,
+              "findings": [],
+              "revised_final_text": null,
+              "reasoning_summary": "ok"
+            }
+            """,
+            """
+            {
+              "canon_event_draft": null,
+              "memory_candidates": [],
+              "contradictions": [],
+              "should_write": false
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "我观察中继站外壳有什么明显痕迹",
+            "session_id": "surface-session",
+            "thread_id": "surface-session",
+            "turn_id": "surface-turn",
+            "sqlite_path": str(tmp_path / "surface.sqlite"),
+            "content_dir": str(Path.cwd() / "content"),
+            "scenario_id": "crystal_stop_singing_smoke",
+            "conditional_advisors_mode": True,
+            "context_budget_mode": "enforced",
+            "trace_events": [],
+        }
+    )
+
+    nodes = [event["node"] for event in result["trace_events"]]
+    assert "plan_turn_from_routing" in nodes
+    assert "select_scenario_surface_with_llm" in nodes
+    assert "direct_scenario_with_llm" not in nodes
+    assert result["advisor_skip_reasons"]["scenario_director"] == (
+        "conditional_surface_selector"
+    )
+    assert result["scenario_surface_selector"]["surface_id"] == "station_cut_marks"
+    assert result["scenario_director"]["validated_patches"] == [
+        {
+            "op": "append",
+            "path": ["revealed_facts"],
+            "value": "中继站外壳有清晰的切割痕迹，像是近期被外力打开过。",
+        }
+    ]
+    assert result["world_projection"]["revealed_facts"] == [
+        "中继站外壳有清晰的切割痕迹，像是近期被外力打开过。"
+    ]
+
+
+def test_conditional_surface_selector_falls_back_on_invalid_surface(tmp_path) -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(
+                route="answer",
+                intent_kind="info_query",
+                needs_scenario_director=True,
+                allow_direct_answer=True,
+            ),
+            """
+            {
+              "decision": "select",
+              "surface_id": "not_loaded",
+              "fallback_to_full_director": false,
+              "reason": "Bad id.",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "decision": "no_change",
+              "proposed_patches": [],
+              "player_visible_context": "The full director handled the scene context.",
+              "gm_only_reason": "Selector output did not validate.",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "final_text": "The full director handled the scene context.",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "What can I see?",
+            "session_id": "surface-fallback-session",
+            "thread_id": "surface-fallback-session",
+            "turn_id": "surface-fallback-turn",
+            "sqlite_path": str(tmp_path / "surface-fallback.sqlite"),
+            "content_dir": str(Path.cwd() / "content"),
+            "scenario_id": "crystal_stop_singing_smoke",
+            "conditional_advisors_mode": True,
+            "context_budget_mode": "enforced",
+            "trace_events": [],
+        }
+    )
+
+    nodes = [event["node"] for event in result["trace_events"]]
+    assert "select_scenario_surface_with_llm" in nodes
+    assert "direct_scenario_with_llm" in nodes
+    assert result["scenario_surface_selector"]["fallback_to_full_director"] is True
+    assert result["scenario_surface_selector"]["fallback_reason"] == (
+        "invalid_or_missing_surface_id"
+    )
+    assert "scenario_director" not in result.get("advisor_skip_reasons", {})
+
+
+def test_conditional_surface_selector_error_uses_safe_surface_recovery(tmp_path) -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(
+                route="answer",
+                intent_kind="info_query",
+                needs_scenario_director=True,
+                allow_direct_answer=True,
+            ),
+            "not json",
+            """
+            {
+              "final_text": "你看到中继站外壳有清晰的切割痕迹。",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+            """
+            {
+              "ok": true,
+              "blocks_output": false,
+              "findings": [],
+              "revised_final_text": null,
+              "reasoning_summary": "ok"
+            }
+            """,
+            """
+            {
+              "canon_event_draft": null,
+              "memory_candidates": [],
+              "contradictions": [],
+              "should_write": false
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "我观察当前处境",
+            "session_id": "surface-error-session",
+            "thread_id": "surface-error-session",
+            "turn_id": "surface-error-turn",
+            "sqlite_path": str(tmp_path / "surface-error.sqlite"),
+            "content_dir": str(Path.cwd() / "content"),
+            "scenario_id": "crystal_stop_singing_smoke",
+            "conditional_advisors_mode": True,
+            "context_budget_mode": "enforced",
+            "trace_events": [],
+        }
+    )
+
+    nodes = [event["node"] for event in result["trace_events"]]
+    assert "select_scenario_surface_with_llm" in nodes
+    assert "direct_scenario_with_llm" not in nodes
+    assert result["scenario_surface_selector"]["surface_id"] == "station_cut_marks"
+    selector_event = next(
+        event
+        for event in result["trace_events"]
+        if event["node"] == "select_scenario_surface_with_llm"
+    )
+    assert selector_event["advisor"]["deterministic_recovery"] == "true"
+    assert "fallback" not in selector_event["advisor"]
+
+
+def test_conditional_surface_selector_empty_fallback_uses_safe_surface_recovery(
+    tmp_path,
+) -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from trpg_agent.graph.build_turn_graph import build_turn_graph_with_model
+
+    model = FakeListChatModel(
+        responses=[
+            _routing_response(
+                route="answer",
+                intent_kind="info_query",
+                needs_scenario_director=True,
+                allow_direct_answer=True,
+            ),
+            """
+            {
+              "decision": "fallback",
+              "surface_id": null,
+              "fallback_to_full_director": true,
+              "reason": "No valid selection possible",
+              "citations": []
+            }
+            """,
+            """
+            {
+              "final_text": "你看到中继站外壳有清晰的切割痕迹。",
+              "canon_event_draft": null,
+              "memory_candidates": []
+            }
+            """,
+            """
+            {
+              "ok": true,
+              "blocks_output": false,
+              "findings": [],
+              "revised_final_text": null,
+              "reasoning_summary": "ok"
+            }
+            """,
+            """
+            {
+              "canon_event_draft": null,
+              "memory_candidates": [],
+              "contradictions": [],
+              "should_write": false
+            }
+            """,
+        ]
+    )
+
+    result = build_turn_graph_with_model(model).invoke(
+        {
+            "player_input": "我观察当前处境",
+            "session_id": "surface-empty-fallback-session",
+            "thread_id": "surface-empty-fallback-session",
+            "turn_id": "surface-empty-fallback-turn",
+            "sqlite_path": str(tmp_path / "surface-empty-fallback.sqlite"),
+            "content_dir": str(Path.cwd() / "content"),
+            "scenario_id": "crystal_stop_singing_smoke",
+            "conditional_advisors_mode": True,
+            "context_budget_mode": "enforced",
+            "trace_events": [],
+        }
+    )
+
+    nodes = [event["node"] for event in result["trace_events"]]
+    assert "select_scenario_surface_with_llm" in nodes
+    assert "direct_scenario_with_llm" not in nodes
+    assert result["scenario_surface_selector"]["surface_id"] == "station_cut_marks"
+    selector_event = next(
+        event
+        for event in result["trace_events"]
+        if event["node"] == "select_scenario_surface_with_llm"
+    )
+    assert selector_event["advisor"]["selector_recovery_reason"] == "empty_selector_output"
+
+
 def test_pending_rule_opportunity_blocks_new_risky_resolution() -> None:
     state = {
         "player_input": "我立刻强行破解控制台",
@@ -778,6 +1169,8 @@ def test_single_turn_advisor_path_can_request_resolver() -> None:
         {
             "player_input": "I force the jammed hatch open.",
             "turn_id": "single-turn-risky",
+            "ruleset_id": "lasers_feelings_smoke",
+            "scenario_id": "crystal_stop_singing_smoke",
             "single_turn_advisor_mode": True,
             "eval_smoke_mode": True,
         }
@@ -1176,6 +1569,8 @@ def test_rules_adjudicator_advice_feeds_resolver_request() -> None:
         {
             "player_input": "我尝试说服守卫",
             "turn_id": "llm-rules-advice-turn",
+            "ruleset_id": "lasers_feelings_smoke",
+            "scenario_id": "crystal_stop_singing_smoke",
         }
     )
 
@@ -1227,6 +1622,8 @@ def test_turn_graph_can_use_independent_advisor_models() -> None:
         {
             "player_input": "我尝试说服守卫",
             "turn_id": "independent-advisor-turn",
+            "ruleset_id": "lasers_feelings_smoke",
+            "scenario_id": "crystal_stop_singing_smoke",
         }
     )
 
@@ -1767,6 +2164,8 @@ def test_turn_graph_persists_turn_once(tmp_path) -> None:
         "session_id": "s1",
         "thread_id": "s1",
         "turn_id": "t1",
+        "ruleset_id": "lasers_feelings_smoke",
+        "scenario_id": "crystal_stop_singing_smoke",
         "sqlite_path": str(sqlite_path),
     }
 
@@ -1847,6 +2246,8 @@ def test_durable_turn_graph_uses_sqlite_checkpointer_and_persists_metadata(tmp_p
         "sqlite_path": str(sqlite_path),
         "checkpoint_mode": "sqlite",
         "model_metadata": {"provider": "test"},
+        "ruleset_id": "lasers_feelings_smoke",
+        "scenario_id": "crystal_stop_singing_smoke",
     }
 
     with durable_turn_graph(sqlite_path=sqlite_path) as graph:
@@ -1991,6 +2392,8 @@ def test_llm_scenario_director_validates_and_applies_package_patches(tmp_path) -
             "thread_id": "scenario-session",
             "turn_id": "scenario-turn",
             "sqlite_path": str(sqlite_path),
+            "ruleset_id": "lasers_feelings_smoke",
+            "scenario_id": "crystal_stop_singing_smoke",
         }
     )
 

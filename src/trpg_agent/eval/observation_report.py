@@ -27,6 +27,8 @@ class ObservationReport(BaseModel):
     weighted_avg_prompt_chars: float = 0.0
     prompt_breakdown_missing: int = 0
     retrieval_diagnostics_missing: int = 0
+    scenario_fast_path_count: int = 0
+    scenario_full_director_count: int = 0
     slowest_nodes: list[dict[str, Any]] = Field(default_factory=list)
     advisor_roles: dict[str, dict[str, Any]] = Field(default_factory=dict)
     findings_by_case: dict[str, int] = Field(default_factory=dict)
@@ -48,6 +50,8 @@ class ObservationReport(BaseModel):
             f"- Weighted avg prompt chars: {self.weighted_avg_prompt_chars:.1f}",
             f"- Prompt breakdown missing: {self.prompt_breakdown_missing}",
             f"- Retrieval diagnostics missing: {self.retrieval_diagnostics_missing}",
+            f"- Scenario fast/full director: {self.scenario_fast_path_count}/"
+            f"{self.scenario_full_director_count}",
             "",
             "## Advisor Roles",
         ]
@@ -96,6 +100,8 @@ def build_observation_report(
     runtime_profile_count = 0
     runtime_profile_missing = 0
     retrieval_diagnostics_missing = 0
+    scenario_fast_path_count = 0
+    scenario_full_director_count = 0
     online_runs = 0
     online_full_pass = 0
     seen_result_ids: set[str] = set()
@@ -117,6 +123,8 @@ def build_observation_report(
         if isinstance(runtime, dict) and runtime.get("turn_count"):
             runtime_profile_count += 1
             slowest_nodes.extend(_slow_nodes_from_runtime(result.get("run_id", ""), runtime))
+            scenario_fast_path_count += int(runtime.get("scenario_fast_path_count", 0))
+            scenario_full_director_count += int(runtime.get("scenario_full_director_count", 0))
         else:
             runtime_profile_missing += 1
         trace_sample = payload.get("trace_sample", [])
@@ -162,6 +170,8 @@ def build_observation_report(
             if event.get("estimated_prompt_chars") and not event.get("context_chars")
         ),
         retrieval_diagnostics_missing=retrieval_diagnostics_missing,
+        scenario_fast_path_count=scenario_fast_path_count,
+        scenario_full_director_count=scenario_full_director_count,
         slowest_nodes=sorted(
             slowest_nodes,
             key=lambda item: int(item.get("elapsed_ms", 0)),

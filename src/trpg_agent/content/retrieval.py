@@ -218,6 +218,22 @@ def search_registry_text_indexed(
         return RetrievalResult(spans=fallback.spans, diagnostics=diagnostics)
 
 
+def warm_content_index(
+    registry: ContentRegistry,
+    *,
+    sqlite_path: Path,
+) -> dict[str, Any]:
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(sqlite_path) as conn:
+        conn.row_factory = sqlite3.Row
+        index_rebuilt = _ensure_content_index(conn, registry)
+        row = conn.execute("SELECT COUNT(*) AS count FROM content_reference_index").fetchone()
+    return {
+        "index_rebuilt": index_rebuilt,
+        "indexed_references": int(row["count"] if row else 0),
+    }
+
+
 def _ensure_content_index(conn: sqlite3.Connection, registry: ContentRegistry) -> bool:
     conn.executescript(
         """

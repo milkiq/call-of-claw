@@ -375,6 +375,54 @@ def test_session_cli_delete_all_sessions_preserves_eval_runs(tmp_path) -> None:
     assert _checkpoint_thread_ids(sqlite_path) == []
 
 
+def test_session_cli_cleanup_tests_deletes_known_test_sessions(tmp_path) -> None:
+    runner = CliRunner()
+    sqlite_path = tmp_path / "session-cleanup-tests.sqlite"
+    env = {"TRPG_AGENT_SQLITE": str(sqlite_path)}
+    store = SqliteStore(sqlite_path)
+    store.migrate()
+    for session_id in [
+        "online-playtest-abc123",
+        "eval-durable-turn-replay-abc123",
+        "live-eval-live-abc123-1",
+        "long-play-abc123",
+        "roll-boundary-smoke",
+        "play-real",
+        "default",
+    ]:
+        store.upsert_session(session_id=session_id)
+    _insert_checkpoint_rows(
+        sqlite_path,
+        [
+            "online-playtest-abc123:turn",
+            "eval-durable-turn-replay-abc123:turn",
+            "play-real:turn",
+        ],
+    )
+
+    deleted = runner.invoke(
+        app,
+        ["session", "cleanup-tests", "--yes", "--json"],
+        env=env,
+    )
+
+    assert deleted.exit_code == 0
+    payload = json.loads(deleted.output)
+    assert payload["deleted"] is True
+    assert sorted(payload["session_ids"]) == [
+        "eval-durable-turn-replay-abc123",
+        "live-eval-live-abc123-1",
+        "long-play-abc123",
+        "online-playtest-abc123",
+        "roll-boundary-smoke",
+    ]
+    assert sorted(session["id"] for session in store.list_sessions()) == [
+        "default",
+        "play-real",
+    ]
+    assert _checkpoint_thread_ids(sqlite_path) == ["play-real:turn"]
+
+
 def test_eval_long_play_cli(tmp_path) -> None:
     runner = CliRunner()
     result = runner.invoke(
@@ -483,6 +531,7 @@ def test_play_profile_resolver_sets_expected_flags() -> None:
     fast = _resolve_play_profile("fast")
     assert fast.use_llm is True
     assert fast.micro_gates is False
+    assert fast.conditional_advisors is True
     assert fast.parallel_review is True
     assert fast.advisor_contracts == "legacy"
     assert fast.runtime_budget_profile == "fast"
@@ -491,6 +540,7 @@ def test_play_profile_resolver_sets_expected_flags() -> None:
     local = _resolve_play_profile("fast", local=True)
     assert local.use_llm is False
     assert local.micro_gates is False
+    assert local.conditional_advisors is False
     assert local.parallel_review is False
     assert local.advisor_contracts == "legacy"
     assert local.context_budget_mode == "shadow"

@@ -1,0 +1,120 @@
+schema_version: 1
+id: coc7_light_investigation_compiled
+package_id: coc7_light_investigation
+resolver_id: rules_dsl_v1
+plugin_ref: rules_plugin
+default_target: 50
+default_approach: spot_hidden
+character_creation:
+  enabled: true
+  intro: >
+    先创建调查员。这个简化规则使用百分骰，并为通用性测试保留多属性、多技能、幸运和理智压力。
+  questions:
+    - id: name
+      prompt: 调查员叫什么？
+      field: name
+      required: true
+    - id: concept
+      prompt: 一句话描述调查员的职业或身份。
+      field: concept
+      required: true
+    - id: strong_skill
+      prompt: 选择一个强项：侦查、图书馆、聆听、心理学、潜行、说服、机械维修、神秘学、急救。
+      field: strong_skill
+      required: false
+    - id: weak_spot
+      prompt: 角色面对异常时最容易动摇的弱点是什么？
+      field: weak_spot
+      required: false
+  mechanical_assignments:
+    - field: luck
+      default: 50
+      min: 1
+      max: 99
+    - field: sanity
+      default: 55
+      min: 1
+      max: 99
+  summary_template: "{name}，{concept}。强项：{strong_skill}。弱点：{weak_spot}"
+dice:
+  base_sides: 100
+  base_dice: 1
+  max_dice: 2
+approaches:
+  spot_hidden:
+    label: Spot Hidden
+    success_when: below
+    keywords: [observe, inspect, search, look, 观察, 搜索, 调查, 查看, 侦查]
+  library_use:
+    label: Library Use
+    success_when: below
+    keywords: [research, archive, books, records, 资料, 档案, 图书馆, 记录]
+  listen:
+    label: Listen
+    success_when: below
+    keywords: [listen, sound, hear, 聆听, 声音, 听]
+  psychology:
+    label: Psychology
+    success_when: below
+    keywords: [read, motive, lie, 心理, 动机, 撒谎]
+  stealth:
+    label: Stealth
+    success_when: below
+    keywords: [sneak, hide, quietly, 潜行, 躲, 悄悄]
+  persuade:
+    label: Persuade
+    success_when: below
+    keywords: [persuade, convince, calm, 说服, 劝, 安抚]
+  mechanical_repair:
+    label: Mechanical Repair
+    success_when: below
+    keywords: [repair, machine, radio, beacon, 修理, 机械, 无线电, 灯塔]
+  occult:
+    label: Occult
+    success_when: below
+    keywords: [occult, ritual, symbol, 神秘, 仪式, 符号]
+  luck:
+    label: Luck
+    success_when: below
+    keywords: [luck, chance, avoid, 幸运, 运气, 碰巧]
+  sanity:
+    label: Sanity
+    success_when: below
+    keywords: [sanity, horror, unnatural, 理智, 恐怖, 异常]
+bands:
+  "0":
+    id: failure
+    label: Failure
+    summary: The action fails and the GM may apply only an established pressure or complication.
+  "1":
+    id: success
+    label: Success
+    summary: The action succeeds; the GM may reveal one appropriate clue or benefit.
+gm_constraints:
+  - Use the rules plugin for skill, attribute, luck, sanity, opposed, difficulty, modifier, and pushed-roll adjudication.
+  - Reveal observable clues before conclusions.
+  - Do not ask the player to roll dice manually.
+  - Do not invent injuries, lost gear, new monsters, or sanity effects outside plugin or scenario authorization.
+default_character_context:
+  attributes:
+    str: 45
+    dex: 55
+    int: 65
+    pow: 55
+    con: 50
+    app: 50
+    edu: 60
+  skills:
+    spot_hidden: 60
+    library_use: 55
+    listen: 45
+    psychology: 40
+    stealth: 40
+    persuade: 45
+    mechanical_repair: 50
+    occult: 35
+    first_aid: 45
+  luck: 50
+  sanity: 55
+rules_model:
+  plugin_driver: rules_dsl_v1

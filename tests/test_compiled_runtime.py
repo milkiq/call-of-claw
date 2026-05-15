@@ -4,6 +4,7 @@ from trpg_agent.content.compiled import load_compiled_ruleset, load_compiled_sce
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.memory.store import SqliteStore
 from trpg_agent.rules.compiled_resolver import registered_resolver_ids, run_ruleset_resolver
+from trpg_agent.rules.plugin_runtime import load_rules_plugin
 from trpg_agent.scenario.runtime import start_session, sync_scene_details
 
 
@@ -14,13 +15,17 @@ def test_compiled_packages_load() -> None:
     ruleset = load_compiled_ruleset(registry, "lasers_feelings_smoke")
     sum_ruleset = load_compiled_ruleset(registry, "sum_target_smoke")
     percentile_ruleset = load_compiled_ruleset(registry, "percentile_smoke")
+    coc_ruleset = load_compiled_ruleset(registry, "coc7_light_investigation")
     scenario = load_compiled_scenario(registry, "crystal_stop_singing_smoke")
     mystery = load_compiled_scenario(registry, "old_manor_mystery")
     survival = load_compiled_scenario(registry, "storm_watch_survival")
+    black_tide = load_compiled_scenario(registry, "black_tide_beacon")
 
     assert ruleset.resolver_id == "threshold_d6"
     assert sum_ruleset.resolver_id == "sum_target"
     assert percentile_ruleset.resolver_id == "percentile_under"
+    assert coc_ruleset.resolver_id == "rules_dsl_v1"
+    assert load_rules_plugin(registry, "coc7_light_investigation") is not None
     assert ruleset.default_character_context == {
         "number": 4,
         "expert": False,
@@ -48,6 +53,7 @@ def test_compiled_packages_load() -> None:
     assert scenario.initial_scene == "scene_1"
     assert mystery.initial_scene == "foyer"
     assert survival.initial_scene == "station_roof"
+    assert black_tide.initial_scene == "harbor_road"
     assert scenario.initial_state.clock.value == 0
     assert {"threshold_d6", "sum_target", "percentile_under"}.issubset(
         set(registered_resolver_ids())
@@ -219,6 +225,112 @@ def test_third_resolver_family_runs_without_core_graph_changes(tmp_path: Path) -
     assert result["dice_expression"] == "1d100"
     assert result["target_number"] == 55
     assert result["successes"] in {0, 1}
+
+
+def test_rules_dsl_plugin_supports_multi_check_difficulty_and_modifiers(tmp_path: Path) -> None:
+    root = Path.cwd()
+    character_context = {
+        "attributes": {"int": 70, "dex": 50},
+        "skills": {"spot_hidden": 60, "mechanical_repair": 40},
+        "luck": 35,
+        "sanity": 45,
+    }
+
+    regular = run_ruleset_resolver(
+        content_dir=str(root / "content"),
+        ruleset_id="coc7_light_investigation",
+        action="我检查灯塔镜片上的盐痕",
+        check_id="spot_hidden",
+        difficulty="regular",
+        character_context=character_context,
+        session_id="dsl",
+        turn_id="dsl-regular",
+        sqlite_path=str(tmp_path / "resolver.sqlite"),
+    )
+    hard = run_ruleset_resolver(
+        content_dir=str(root / "content"),
+        ruleset_id="coc7_light_investigation",
+        action="我修理无线电并稳定灯塔机械",
+        check_id="mechanical_repair",
+        difficulty="hard",
+        modifier="bonus",
+        character_context=character_context,
+        session_id="dsl",
+        turn_id="dsl-hard",
+        sqlite_path=str(tmp_path / "resolver.sqlite"),
+    )
+    replay = run_ruleset_resolver(
+        content_dir=str(root / "content"),
+        ruleset_id="coc7_light_investigation",
+        action="我修理无线电并稳定灯塔机械",
+        check_id="mechanical_repair",
+        difficulty="hard",
+        modifier="bonus",
+        character_context=character_context,
+        session_id="dsl",
+        turn_id="dsl-hard",
+        sqlite_path=str(tmp_path / "resolver.sqlite"),
+    )
+
+    assert regular["resolver_id"] == "rules_dsl_v1"
+    assert regular["check_id"] == "spot_hidden"
+    assert regular["target_value"] == 60
+    assert hard == replay
+    assert hard["check_id"] == "mechanical_repair"
+    assert hard["difficulty_level"] == "hard"
+    assert hard["target_value"] == 20
+    assert hard["modifier"] == "bonus"
+    assert len(hard["roll_candidates"]) == 2
+    assert hard["selected_roll"]["total"] == min(
+        candidate["total"] for candidate in hard["roll_candidates"]
+    )
+
+
+def test_rules_dsl_plugin_supports_sanity_luck_and_pushed_pressure(tmp_path: Path) -> None:
+    root = Path.cwd()
+    scene_context = {
+        "clock": {"id": "black_tide_pressure", "value": 1, "max": 5},
+    }
+    character_context = {"luck": 35, "sanity": 45}
+
+    luck = run_ruleset_resolver(
+        content_dir=str(root / "content"),
+        ruleset_id="coc7_light_investigation",
+        action="我靠运气避开突然涌上的黑潮",
+        procedure_id="luck_check",
+        check_id="luck",
+        character_context=character_context,
+        scene_context=scene_context,
+        session_id="dsl",
+        turn_id="dsl-luck",
+        sqlite_path=str(tmp_path / "resolver.sqlite"),
+    )
+    sanity = run_ruleset_resolver(
+        content_dir=str(root / "content"),
+        ruleset_id="coc7_light_investigation",
+        action="我直视那个会回应我想法的石头",
+        procedure_id="sanity_check",
+        check_id="sanity",
+        difficulty="hard",
+        pushed=True,
+        character_context=character_context,
+        scene_context=scene_context,
+        session_id="dsl",
+        turn_id="dsl-sanity",
+        sqlite_path=str(tmp_path / "resolver.sqlite"),
+    )
+
+    assert luck["procedure_id"] == "luck_check"
+    assert luck["check_id"] == "luck"
+    assert sanity["procedure_id"] == "sanity_check"
+    assert sanity["check_id"] == "sanity"
+    assert sanity["pushed"] is True
+    if sanity["success_level"] == "failure":
+        assert {
+            "op": "increment",
+            "path": ["clock", "value"],
+            "value": 2,
+        } in sanity["world_patches"]
 
 
 def test_session_start_initializes_scenario_state(tmp_path: Path) -> None:

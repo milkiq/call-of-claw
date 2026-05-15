@@ -10,6 +10,7 @@ from trpg_agent.app.config import AppConfig
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.eval.cases import EvalCase, load_eval_cases
 from trpg_agent.eval.scorecard import EvalFinding, EvalResult, score_from_findings
+from trpg_agent.eval.session_cleanup import cleanup_sessions
 from trpg_agent.graph.build_turn_graph import (
     TURN_GRAPH_VERSION,
     build_turn_graph_with_model,
@@ -206,6 +207,11 @@ def run_deterministic_case(config: AppConfig, case: EvalCase) -> list[EvalFindin
                         suggested_area="memory.store",
                     )
                 )
+        cleanup_sessions(
+            store=store,
+            sqlite_path=config.sqlite_path,
+            session_ids=[session_id],
+        )
 
     return findings
 

@@ -12,7 +12,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
-from trpg_agent.content.compiled import load_compiled_ruleset
+from trpg_agent.content.compiled import CompiledRuleset, load_compiled_ruleset
 from trpg_agent.content.packages import PackageKind
 from trpg_agent.content.registry import ContentRegistry
 from trpg_agent.content.retrieval import search_registry_text_indexed
@@ -38,6 +38,7 @@ from trpg_agent.langchain.prompts import (
     RISK_MICRO_GATE_PROMPT_VERSION,
     RULES_ADJUDICATOR_PROMPT_VERSION,
     SCENARIO_DIRECTOR_PROMPT_VERSION,
+    SCENARIO_SURFACE_SELECTOR_PROMPT_VERSION,
     SINGLE_TURN_ADVISOR_PROMPT_VERSION,
     TARGET_MICRO_GATE_PROMPT_VERSION,
 )
@@ -56,6 +57,7 @@ from trpg_agent.langchain.structured import (
     RiskMicroGateDecision,
     RulesAdjudicationAdvice,
     ScenarioDirectorDecision,
+    ScenarioSurfaceSelectorDecision,
     SingleTurnAdvisorDecision,
     TargetMicroGateDecision,
     ToolRequest,
@@ -135,6 +137,7 @@ def _runtime_metadata(state: GraphState) -> dict[str, Any]:
             "memory_recall_micro_gate": MEMORY_RECALL_MICRO_GATE_PROMPT_VERSION,
             "rules_adjudicator": RULES_ADJUDICATOR_PROMPT_VERSION,
             "scenario_director": SCENARIO_DIRECTOR_PROMPT_VERSION,
+            "scenario_surface_selector": SCENARIO_SURFACE_SELECTOR_PROMPT_VERSION,
             "single_turn_advisor": SINGLE_TURN_ADVISOR_PROMPT_VERSION,
             "memory_curator": MEMORY_CURATOR_PROMPT_VERSION,
             "narration": NARRATION_PROMPT_VERSION,
@@ -146,6 +149,7 @@ def _runtime_metadata(state: GraphState) -> dict[str, Any]:
         "checkpoint_mode": state.get("checkpoint_mode", "none"),
         "advisor_contract_mode": _advisor_contract_mode(state),
         "context_budget_mode": _context_budget_mode(state),
+        "conditional_advisors_mode": bool(state.get("conditional_advisors_mode")),
         "model": state.get("model_metadata", {}),
     }
 
@@ -170,6 +174,85 @@ def _context_packet(state: GraphState, role: str, **extra_context: Any) -> dict[
         mode=_context_budget_mode(state),
         extra_context=extra_context,
     )
+
+
+def _conditional_advisors_enabled(state: Mapping[str, Any]) -> bool:
+    return bool(state.get("conditional_advisors_mode")) and not bool(
+        state.get("single_turn_advisor_mode") or state.get("micro_gates_mode")
+    )
+
+
+def _with_advisor_skip_reason(
+    state: GraphState,
+    advisor: str,
+    reason: str,
+) -> GraphState:
+    return {
+        **state,
+        "advisor_skip_reasons": {
+            **dict(state.get("advisor_skip_reasons", {})),
+            advisor: reason,
+        },
+    }
+
+
+def _turn_complexity(state: Mapping[str, Any]) -> dict[str, Any]:
+    routing = (
+        state.get("routing_decision")
+        if isinstance(state.get("routing_decision"), dict)
+        else {}
+    )
+    plan = state.get("turn_plan") if isinstance(state.get("turn_plan"), dict) else {}
+    return {
+        "route": routing.get("route"),
+        "decision": plan.get("decision"),
+        "needs_rules_resolution": bool(routing.get("needs_rules_resolution")),
+        "needs_scenario_director": bool(routing.get("needs_scenario_director")),
+        "has_successful_resolver_result": _has_successful_resolver_result(state),  # type: ignore[arg-type]
+        "has_validated_scenario_progress": _has_validated_scenario_progress(state),  # type: ignore[arg-type]
+        "pending_rule_opportunities": len(_pending_rule_opportunities(state)),  # type: ignore[arg-type]
+    }
+
+
+def _should_direct_plan_from_routing(state: GraphState) -> bool:
+    if not _conditional_advisors_enabled(state):
+        return False
+    if _pending_rule_opportunities(state):
+        return False
+    routing = state.get("routing_decision") or {}
+    route = str(routing.get("route") or "")
+    if route not in {"answer", "free_action", "rules_query", "memory_recall"}:
+        return False
+    if routing.get("needs_rules_resolution") or routing.get("needs_rules_review"):
+        return False
+    if route in {"answer", "rules_query", "memory_recall"} and not bool(
+        routing.get("allow_direct_answer")
+    ):
+        return False
+    return True
+
+
+def _low_risk_local_review_reason(state: GraphState) -> str | None:
+    if not _conditional_advisors_enabled(state):
+        return None
+    decision = str(state.get("turn_plan", {}).get("decision") or "")
+    if decision not in {"answer", "free_action"}:
+        return None
+    if _has_successful_resolver_result(state) or _has_validated_scenario_progress(state):
+        return None
+    if state.get("tool_results"):
+        return None
+    if _pending_rule_opportunities(state):
+        return None
+    routing = state.get("routing_decision") or {}
+    if routing.get("needs_rules_resolution") or routing.get("route") in {
+        "risky_action",
+        "boundary",
+        "clarify",
+        "gm_move",
+    }:
+        return None
+    return "low_risk_no_tools_no_validated_patches"
 
 
 def _structured_call_trace(
@@ -255,6 +338,7 @@ def _restore_existing_turn(
 def load_runtime_context(state: GraphState) -> GraphState:
     content_dir = Path(state.get("content_dir") or Path.cwd() / "content")
     registry = ContentRegistry.load(content_dir, content_dir.parent)
+    preload = state.get("runtime_preload") or {}
     next_state: GraphState = {
         **state,
         "session_id": state.get("session_id") or "default",
@@ -282,10 +366,17 @@ def load_runtime_context(state: GraphState) -> GraphState:
         ]
         if package_id
     ]
-    next_state["active_package_ids"] = registry.resolve_active_package_ids(
-        list(dict.fromkeys(active_ids))
-    )
-    next_state["package_profiles"] = registry.package_profiles(next_state["active_package_ids"])
+    if (
+        preload.get("ruleset_id") == next_state.get("ruleset_id")
+        and preload.get("scenario_id") == next_state.get("scenario_id")
+    ):
+        next_state["active_package_ids"] = list(preload.get("active_package_ids") or [])
+        next_state["package_profiles"] = list(preload.get("package_profiles") or [])
+    else:
+        next_state["active_package_ids"] = registry.resolve_active_package_ids(
+            list(dict.fromkeys(active_ids))
+        )
+        next_state["package_profiles"] = registry.package_profiles(next_state["active_package_ids"])
     runtime_metadata = dict(next_state.get("runtime_metadata", {}))
     runtime_metadata["content_packages"] = {
         package_id: registry.by_id[package_id].manifest.version
@@ -294,7 +385,13 @@ def load_runtime_context(state: GraphState) -> GraphState:
     }
     if next_state.get("ruleset_id"):
         try:
-            ruleset = load_compiled_ruleset(registry, next_state["ruleset_id"])
+            if preload.get("ruleset_id") == next_state.get("ruleset_id") and isinstance(
+                preload.get("compiled_ruleset"),
+                dict,
+            ):
+                ruleset = CompiledRuleset.model_validate(preload["compiled_ruleset"])
+            else:
+                ruleset = load_compiled_ruleset(registry, next_state["ruleset_id"])
             runtime_metadata["ruleset_resolver_id"] = ruleset.resolver_id
             if not next_state.get("character_context"):
                 next_state["character_context"] = dict(ruleset.default_character_context)
@@ -537,6 +634,11 @@ def classify_player_intent(state: GraphState) -> GraphState:
 def _resolver_tool_request(
     state: GraphState,
     approach: str | None = None,
+    procedure_id: str | None = None,
+    check_id: str | None = None,
+    difficulty: str | None = None,
+    modifier: str | None = None,
+    pushed: bool = False,
     risk: str = "risky_uncertain",
 ) -> ToolRequest:
     return ToolRequest(
@@ -546,6 +648,11 @@ def _resolver_tool_request(
             "ruleset_id": state.get("ruleset_id"),
             "action": state.get("player_input", ""),
             "approach": approach,
+            "procedure_id": procedure_id,
+            "check_id": check_id,
+            "difficulty": difficulty,
+            "modifier": modifier,
+            "pushed": pushed,
             "risk": risk,
             "character_context": state.get("character_context", {}),
             "scene_context": state.get("world_projection", {}),
@@ -568,6 +675,15 @@ def _protected_resolver_arguments(state: GraphState) -> dict[str, Any]:
         "turn_id": state.get("turn_id", "turn"),
         "sqlite_path": state.get("sqlite_path"),
     }
+
+
+def _rules_plugin_arguments(rules_advice: dict[str, Any]) -> dict[str, Any]:
+    allowed = {}
+    for key in ["procedure_id", "check_id", "difficulty", "modifier", "pushed"]:
+        value = rules_advice.get(key)
+        if value not in (None, ""):
+            allowed[key] = value
+    return allowed
 
 
 def _compiled_ruleset_from_state(state: GraphState):
@@ -856,6 +972,70 @@ def build_llm_adjudication_node(model: BaseChatModel):
     return adjudicate_with_llm
 
 
+def plan_turn_from_routing(state: GraphState) -> GraphState:
+    routing = IntentRoutingDecision.model_validate(state.get("routing_decision", {}))
+    decision = routing.route
+    if decision in {"rules_query", "memory_recall"}:
+        decision = "answer"
+    if decision not in {"answer", "free_action"}:
+        decision = "free_action"
+    plan = TurnPlan(
+        intent=routing.intent,
+        authority=AuthorityResult(
+            ok=True,
+            reason="Conditional advisor runtime accepted the structured low-risk routing.",
+        ),
+        decision=decision,  # type: ignore[arg-type]
+        tool_requests=[],
+        narration_brief=_direct_plan_narration_brief(routing),
+        citations=list(routing.citations or []),
+    )
+    next_state = _with_advisor_skip_reason(
+        {
+            **state,
+            "intent": plan.intent.model_dump(),
+            "authority_result": plan.authority.model_dump(),
+            "turn_plan": plan.model_dump(),
+            "tool_requests": [],
+        },
+        "core_gm",
+        "conditional_direct_plan",
+    )
+    next_state = {**next_state, "turn_complexity": _turn_complexity(next_state)}
+    return _append_trace(
+        next_state,
+        "plan_turn_from_routing",
+        {
+            "decision": plan.decision,
+            "tool_requests": [],
+            "turn_complexity": next_state["turn_complexity"],
+            "advisor_skip_reasons": next_state.get("advisor_skip_reasons", {}),
+        },
+    )
+
+
+def _direct_plan_narration_brief(routing: IntentRoutingDecision) -> str:
+    if routing.route == "memory_recall":
+        return (
+            "Answer only from established recent canon and player-visible memory. Do not create "
+            "new facts or scene changes."
+        )
+    if routing.route == "rules_query":
+        return (
+            "Answer the rules question using loaded public rules context. Do not resolve an "
+            "action or roll dice."
+        )
+    if routing.route == "answer":
+        return (
+            "Answer using established visible facts, public rules context, and player-visible "
+            "memory only."
+        )
+    return (
+        "Advance only a low-risk visible free action. Do not create durable facts, rewards, "
+        "hidden reveals, costs, or scene transitions unless validated by later tools."
+    )
+
+
 def _micro_gate_turn_plan(state: GraphState) -> TurnPlan:
     routing = IntentRoutingDecision.model_validate(state.get("routing_decision", {}))
     route = routing.route
@@ -885,6 +1065,7 @@ def _micro_gate_turn_plan(state: GraphState) -> TurnPlan:
             _resolver_tool_request(
                 state,
                 approach=_approach_for_resolver_request(state, rules_advice.get("approach_id")),
+                **_rules_plugin_arguments(rules_advice),
                 risk=str(rules_advice.get("risk") or "risky_uncertain"),
             )
         )
@@ -1776,6 +1957,8 @@ def route_after_intent_arbiter(state: GraphState) -> str:
         or routing.get("route") == "risky_action"
     ):
         return "rules_advice"
+    if _should_direct_plan_from_routing(state):
+        return "direct_plan"
     return "adjudicate"
 
 
@@ -2478,6 +2661,9 @@ def _has_failed_required_resolution(state: GraphState) -> bool:
 
 
 def critic_guardrail_locally(state: GraphState) -> GraphState:
+    local_review_reason = _low_risk_local_review_reason(state)
+    if local_review_reason:
+        state = _with_advisor_skip_reason(state, "critic_guardrail", local_review_reason)
     findings: list[CriticFinding] = []
     final_output = state.get("final_output", "")
     if _has_failed_required_resolution(state):
@@ -2519,6 +2705,7 @@ def critic_guardrail_locally(state: GraphState) -> GraphState:
                 finding.dimension
                 for finding in findings
             ],
+            "advisor_skip_reasons": state.get("advisor_skip_reasons", {}),
         },
     )
 
@@ -2904,10 +3091,20 @@ def curate_memory_locally(state: GraphState) -> GraphState:
         contradictions=[],
         should_write=bool(candidates),
     )
+    local_review_reason = _low_risk_local_review_reason(state)
+    if local_review_reason:
+        state = _with_advisor_skip_reason(
+            state,
+            "memory_curator",
+            "low_risk_local_curation" if candidates else "no_durable_event",
+        )
     return _append_trace(
         {**state, "memory_curation": curation.model_dump()},
         "curate_memory_locally",
-        {"memory_candidates": [candidate.kind for candidate in candidates]},
+        {
+            "memory_candidates": [candidate.kind for candidate in candidates],
+            "advisor_skip_reasons": state.get("advisor_skip_reasons", {}),
+        },
     )
 
 
@@ -3235,6 +3432,7 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
     rejected_tool_requests: list[dict[str, Any]] = []
     advised_approach = _approach_for_resolver_request(state, rules_advice.get("approach_id"))
     advised_risk = str(rules_advice.get("risk") or "risky_uncertain")
+    advised_plugin_args = _rules_plugin_arguments(rules_advice)
     for raw_request in state.get("tool_requests", []):
         request = ToolRequest.model_validate(raw_request)
         if request.tool_name == "run_ruleset_resolver":
@@ -3246,6 +3444,8 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
             )
             if not arguments.get("risk") and advised_risk:
                 arguments["risk"] = advised_risk
+            for key, value in advised_plugin_args.items():
+                arguments.setdefault(key, value)
             arguments.pop("requested_roll", None)
             arguments.update(_protected_resolver_arguments(state))
             request = request.model_copy(update={"arguments": arguments})
@@ -3266,6 +3466,7 @@ def ensure_resolution_tools(state: GraphState) -> GraphState:
         resolver_request = _resolver_tool_request(
             state,
             approach=advised_approach,
+            **advised_plugin_args,
             risk=advised_risk,
         )
         next_requests.append(resolver_request.model_dump())
@@ -3324,27 +3525,37 @@ def execute_deterministic_tools(state: GraphState) -> GraphState:
 
 
 def _scenario_director_needed(state: GraphState) -> bool:
+    return _scenario_director_skip_reason(state) is None
+
+
+def _scenario_director_skip_reason(state: GraphState) -> str | None:
     if not state.get("sqlite_path"):
-        return False
+        return "no_durable_runtime"
     if not state.get("scenario_id"):
-        return False
+        return "no_loaded_scenario"
     if _has_failed_required_resolution(state):
-        return False
+        return "failed_required_resolution"
     decision = state.get("turn_plan", {}).get("decision")
     if decision in {"clarify", "boundary"}:
-        return False
+        return f"{decision}_turn"
     routing = state.get("routing_decision", {})
     if routing:
         if routing.get("route") == "clarify":
-            return False
+            return "clarification_route"
         if decision == "answer":
-            return bool(routing.get("needs_scenario_director", False))
-        return bool(routing.get("needs_scenario_director", True))
-    return decision in {
+            if not bool(routing.get("needs_scenario_director", False)):
+                return "routing_not_needed_for_answer"
+            return None
+        if not bool(routing.get("needs_scenario_director", True)):
+            return "routing_not_needed"
+        return None
+    if decision not in {
         "free_action",
         "risky_action",
         "gm_move",
-    }
+    }:
+        return "decision_not_scene_affecting"
+    return None
 
 
 def direct_scenario_locally(state: GraphState) -> GraphState:
@@ -3362,9 +3573,306 @@ def direct_scenario_locally(state: GraphState) -> GraphState:
     )
 
 
+def _scenario_surface_selector_eligible(state: GraphState) -> bool:
+    if not _conditional_advisors_enabled(state):
+        return False
+    if _scenario_director_skip_reason(state):
+        return False
+    if state.get("tool_results"):
+        return False
+    if _has_successful_resolver_result(state) or _has_failed_required_resolution(state):
+        return False
+    if _pending_rule_opportunities(state):
+        return False
+    routing = state.get("routing_decision", {})
+    route = str(routing.get("route") or "")
+    if route not in {"answer", "free_action"}:
+        return False
+    if routing.get("needs_rules_resolution") or routing.get("needs_rules_review"):
+        return False
+    decision = str(state.get("turn_plan", {}).get("decision") or "")
+    if decision not in {"answer", "free_action"}:
+        return False
+    return bool(_available_visible_surfaces(state))
+
+
+def _available_visible_surfaces(state: GraphState) -> list[dict[str, Any]]:
+    scene = state.get("world_projection", {}).get("scene", {})
+    if not isinstance(scene, dict):
+        return []
+    used_texts = {
+        str(item).strip()
+        for item in [
+            *state.get("world_projection", {}).get("revealed_facts", []),
+            *state.get("world_projection", {}).get("known_clues", []),
+        ]
+        if str(item).strip()
+    }
+    surfaces: list[dict[str, Any]] = []
+    for raw_surface in scene.get("visible_surfaces", []):
+        if not isinstance(raw_surface, dict):
+            continue
+        surface_id = str(raw_surface.get("id") or "").strip()
+        text = str(raw_surface.get("text") or "").strip()
+        if not surface_id or not text:
+            continue
+        one_shot = bool(raw_surface.get("one_shot", True))
+        if one_shot and text in used_texts:
+            continue
+        surfaces.append(
+            {
+                "id": surface_id,
+                "text": text,
+                "tags": [str(tag) for tag in raw_surface.get("tags", [])[:8]],
+                "one_shot": one_shot,
+            }
+        )
+    return surfaces
+
+
+def build_llm_scenario_surface_selector_node(model: BaseChatModel):
+    def select_scenario_surface_with_llm(state: GraphState) -> GraphState:
+        candidates = _available_visible_surfaces(state)
+        if not candidates:
+            return _append_trace(
+                {
+                    **state,
+                    "scenario_surface_selector": {
+                        "fallback_to_full_director": True,
+                        "fallback_reason": "no_visible_surface_candidates",
+                    },
+                },
+                "select_scenario_surface_with_llm",
+                {
+                    "fallback_to_full_director": True,
+                    "fallback_reason": "no_visible_surface_candidates",
+                },
+            )
+        try:
+            packet = _context_packet(
+                state,
+                "scenario_surface_selector",
+                surface_candidates=candidates,
+                advisor_contract="ScenarioSurfaceSelectorDecision",
+            )
+            result = invoke_advisor(
+                model=model,
+                role="scenario_surface_selector",
+                player_input=state.get("player_input", ""),
+                context=packet["context"],
+                sqlite_path=state.get("sqlite_path"),
+                turn_id=state.get("turn_id"),
+                contract_mode=_advisor_contract_mode(state),
+            )
+            selector = ScenarioSurfaceSelectorDecision.model_validate(
+                result.output.model_dump()
+            )
+            advisor_trace = result.trace_metadata
+            context_packet_trace = packet["trace"]
+            structured_attempts = [
+                {key: value for key, value in attempt.items() if key != "raw_output"}
+                for attempt in result.attempts
+            ]
+        except Exception as error:
+            selector = ScenarioSurfaceSelectorDecision(
+                decision="select",
+                surface_id=str(candidates[0]["id"]),
+                fallback_to_full_director=False,
+                reason=(
+                    "Surface selector failed; deterministic recovery selected the first "
+                    "package-authorized visible surface."
+                ),
+                citations=[],
+            )
+            advisor_trace = {"selector_error": str(error), "deterministic_recovery": "true"}
+            context_packet_trace = {}
+            structured_attempts = []
+
+        if _selector_empty_output_fallback(selector):
+            selector = ScenarioSurfaceSelectorDecision(
+                decision="select",
+                surface_id=str(candidates[0]["id"]),
+                fallback_to_full_director=False,
+                reason=(
+                    "Surface selector returned an empty fallback; deterministic recovery "
+                    "selected the first package-authorized visible surface."
+                ),
+                citations=[],
+            )
+            advisor_trace = {
+                **advisor_trace,
+                "deterministic_recovery": "true",
+                "selector_recovery_reason": "empty_selector_output",
+            }
+
+        selected = _visible_surface_by_id(candidates, selector.surface_id)
+        fallback_reason = _surface_selector_fallback_reason(selector, selected)
+        selector_state = selector.model_dump() | {
+            "fallback_to_full_director": bool(fallback_reason),
+            "fallback_reason": fallback_reason,
+        }
+        trace_payload = {
+            "decision": selector.decision,
+            "surface_id": selector.surface_id,
+            "fallback_to_full_director": bool(fallback_reason),
+            "fallback_reason": fallback_reason,
+            "advisor": advisor_trace,
+            "context_packet": context_packet_trace,
+            "structured_attempts": structured_attempts,
+        }
+        if fallback_reason or not selected:
+            return _append_trace(
+                {**state, "scenario_surface_selector": selector_state},
+                "select_scenario_surface_with_llm",
+                trace_payload,
+            )
+
+        next_state = _with_advisor_skip_reason(
+            {**state, "scenario_surface_selector": selector_state},
+            "scenario_director",
+            "conditional_surface_selector",
+        )
+        decision = _scenario_decision_from_visible_surface(
+            surface=selected,
+            selector=selector,
+            state=next_state,
+        )
+        return _apply_scenario_director_decision(
+            state=next_state,
+            decision=decision,
+            node="select_scenario_surface_with_llm",
+            trace_payload=trace_payload
+            | {
+                "advisor_skip_reasons": next_state.get("advisor_skip_reasons", {}),
+                "selected_surface": {
+                    "id": selected["id"],
+                    "one_shot": selected["one_shot"],
+                    "tags": selected["tags"],
+                },
+            },
+        )
+
+    return select_scenario_surface_with_llm
+
+
+def _visible_surface_by_id(
+    candidates: list[dict[str, Any]],
+    surface_id: str | None,
+) -> dict[str, Any] | None:
+    if not surface_id:
+        return None
+    for surface in candidates:
+        if surface.get("id") == surface_id:
+            return surface
+    return None
+
+
+def _surface_selector_fallback_reason(
+    selector: ScenarioSurfaceSelectorDecision,
+    selected: dict[str, Any] | None,
+) -> str | None:
+    if selector.fallback_to_full_director or selector.decision == "fallback":
+        return "selector_requested_full_director"
+    if not selected:
+        return "invalid_or_missing_surface_id"
+    return None
+
+
+def _selector_empty_output_fallback(selector: ScenarioSurfaceSelectorDecision) -> bool:
+    if selector.decision != "fallback" or selector.surface_id:
+        return False
+    reason = selector.reason.strip().lower()
+    return reason in {
+        "",
+        "no output provided",
+        "no valid selection",
+        "no valid selection possible",
+        "no valid surface selection possible",
+        "no_output_provided",
+    }
+
+
+def _scenario_decision_from_visible_surface(
+    *,
+    surface: dict[str, Any],
+    selector: ScenarioSurfaceSelectorDecision,
+    state: GraphState,
+) -> ScenarioDirectorDecision:
+    text = str(surface.get("text") or "").strip()
+    one_shot = bool(surface.get("one_shot", True))
+    patches = (
+        [{"op": "append", "path": ["revealed_facts"], "value": text}]
+        if one_shot
+        else []
+    )
+    citation = f"{state.get('scenario_id')}:visible_surface:{surface.get('id')}"
+    return ScenarioDirectorDecision(
+        decision="reveal" if patches else "no_change",
+        proposed_patches=patches,
+        player_visible_context=text,
+        gm_only_reason=(
+            "A low-risk conditional selector chose an authorized player-visible "
+            f"surface. Selector reason: {selector.reason}"
+        ),
+        citations=[citation, *selector.citations],
+    )
+
+
+def _apply_scenario_director_decision(
+    *,
+    state: GraphState,
+    decision: ScenarioDirectorDecision,
+    node: str,
+    trace_payload: dict[str, Any],
+) -> GraphState:
+    validation = validate_scenario_director_decision(
+        decision=decision,
+        state=state,
+        content_dir=Path(state.get("content_dir") or Path.cwd() / "content"),
+        scenario_id=state.get("scenario_id"),
+    )
+    validation = _limit_progressive_scenario_reveals(validation, state)
+    player_visible_context = _scoped_scenario_visible_context(decision, validation, state)
+    next_tool_results = list(state.get("tool_results", []))
+    if validation.patches:
+        next_tool_results.append(
+            ToolResult(
+                tool_name="scenario_director",
+                ok=True,
+                result={
+                    "decision": decision.decision,
+                    "player_visible_context": player_visible_context,
+                    "world_patches": [patch.model_dump() for patch in validation.patches],
+                },
+            ).model_dump()
+        )
+
+    next_state = {
+        **state,
+        "tool_results": next_tool_results,
+        "scenario_director": {
+            **decision.model_dump(),
+            "player_visible_context": player_visible_context,
+            "validated_patches": [patch.model_dump() for patch in validation.patches],
+            "rejected_patches": validation.rejected,
+        },
+    }
+    return _append_trace(
+        next_state,
+        node,
+        {
+            **trace_payload,
+            "decision": decision.decision,
+            "validated_patches": [patch.model_dump() for patch in validation.patches],
+            "rejected_patches": validation.rejected,
+        },
+    )
+
+
 def build_llm_scenario_director_node(model: BaseChatModel):
     def direct_scenario_with_llm(state: GraphState) -> GraphState:
-        if not _scenario_director_needed(state):
+        skip_reason = _scenario_director_skip_reason(state)
+        if skip_reason:
             decision = ScenarioDirectorDecision(
                 decision="no_change",
                 proposed_patches=[],
@@ -3372,10 +3880,20 @@ def build_llm_scenario_director_node(model: BaseChatModel):
                 gm_only_reason="Routing did not request scenario intelligence.",
                 citations=[],
             )
-            return _append_trace(
+            next_state = _with_advisor_skip_reason(
                 {**state, "scenario_director": decision.model_dump()},
+                "scenario_director",
+                skip_reason,
+            )
+            return _append_trace(
+                next_state,
                 "direct_scenario_with_llm",
-                {"decision": "no_change", "skipped": True},
+                {
+                    "decision": "no_change",
+                    "skipped": True,
+                    "skip_reason": skip_reason,
+                    "advisor_skip_reasons": next_state.get("advisor_skip_reasons", {}),
+                },
             )
 
         pre_advice = _single_turn_scenario_advice_for_director(state)
@@ -3421,45 +3939,11 @@ def build_llm_scenario_director_node(model: BaseChatModel):
                 context_packet_trace = {}
                 structured_attempts = []
 
-        validation = validate_scenario_director_decision(
-            decision=decision,
+        return _apply_scenario_director_decision(
             state=state,
-            content_dir=Path(state.get("content_dir") or Path.cwd() / "content"),
-            scenario_id=state.get("scenario_id"),
-        )
-        validation = _limit_progressive_scenario_reveals(validation, state)
-        player_visible_context = _scoped_scenario_visible_context(decision, validation, state)
-        next_tool_results = list(state.get("tool_results", []))
-        if validation.patches:
-            next_tool_results.append(
-                ToolResult(
-                    tool_name="scenario_director",
-                    ok=True,
-                    result={
-                        "decision": decision.decision,
-                        "player_visible_context": player_visible_context,
-                        "world_patches": [patch.model_dump() for patch in validation.patches],
-                    },
-                ).model_dump()
-            )
-
-        next_state = {
-            **state,
-            "tool_results": next_tool_results,
-            "scenario_director": {
-                **decision.model_dump(),
-                "player_visible_context": player_visible_context,
-                "validated_patches": [patch.model_dump() for patch in validation.patches],
-                "rejected_patches": validation.rejected,
-            },
-        }
-        return _append_trace(
-            next_state,
-            "direct_scenario_with_llm",
-            {
-                "decision": decision.decision,
-                "validated_patches": [patch.model_dump() for patch in validation.patches],
-                "rejected_patches": validation.rejected,
+            decision=decision,
+            node="direct_scenario_with_llm",
+            trace_payload={
                 "advisor": advisor_trace,
                 "context_packet": context_packet_trace,
                 "structured_attempts": structured_attempts,
@@ -3777,6 +4261,7 @@ def persist_turn(state: GraphState) -> GraphState:
         "tool_results": state.get("tool_results", []),
         "routing_decision": state.get("routing_decision", {}),
         "rules_advice": state.get("rules_advice", {}),
+        "scenario_surface_selector": state.get("scenario_surface_selector", {}),
         "scenario_director": state.get("scenario_director", {}),
         "turn_plan": state.get("turn_plan", {}),
         "narration_plan": state.get("narration_plan", {}),
@@ -3837,7 +4322,22 @@ def route_after_context_retrieval(state: GraphState) -> str:
     return "intent_arbiter"
 
 
+def route_after_tools_for_scenario(state: GraphState) -> str:
+    if _scenario_surface_selector_eligible(state):
+        return "surface_selector"
+    return "scenario_director"
+
+
+def route_after_surface_selector(state: GraphState) -> str:
+    selector = state.get("scenario_surface_selector", {})
+    if selector.get("fallback_to_full_director"):
+        return "scenario_director"
+    return "apply_patches"
+
+
 def route_after_narration(state: GraphState) -> str:
+    if _low_risk_local_review_reason(state):
+        return "local_review"
     if state.get("parallel_review_mode") and not state.get("eval_smoke_mode"):
         return "parallel_review"
     return "critic_guardrail"
@@ -3915,8 +4415,19 @@ def build_turn_graph_with_model(
         ),
     )
     graph.add_node("adjudicate_with_llm", build_llm_adjudication_node(model))
+    graph.add_node("plan_turn_from_routing", plan_turn_from_routing)
     graph.add_node("ensure_resolution_tools", ensure_resolution_tools)
     graph.add_node("execute_deterministic_tools", execute_deterministic_tools)
+    graph.add_node(
+        "select_scenario_surface_with_llm",
+        build_llm_scenario_surface_selector_node(
+            _model_for_role(
+                "scenario_surface_selector",
+                default_model=model,
+                advisor_models=advisor_models,
+            )
+        ),
+    )
     graph.add_node(
         "direct_scenario_with_llm",
         build_llm_scenario_director_node(
@@ -3945,6 +4456,8 @@ def build_turn_graph_with_model(
     )
     graph.add_node("critic_guardrail_with_llm", critic_node)
     graph.add_node("curate_memory_with_llm", memory_node)
+    graph.add_node("critic_guardrail_locally", critic_guardrail_locally)
+    graph.add_node("curate_memory_locally", curate_memory_locally)
     graph.add_node(
         "review_and_curate_parallel",
         build_parallel_review_and_memory_node(critic_node, memory_node),
@@ -3971,17 +4484,41 @@ def build_turn_graph_with_model(
     graph.add_conditional_edges(
         "run_micro_gates",
         route_after_intent_arbiter,
-        {"rules_advice": "advise_rules_with_llm", "adjudicate": "adjudicate_with_llm"},
+        {
+            "rules_advice": "advise_rules_with_llm",
+            "direct_plan": "plan_turn_from_routing",
+            "adjudicate": "adjudicate_with_llm",
+        },
     )
     graph.add_conditional_edges(
         "route_with_intent_arbiter",
         route_after_intent_arbiter,
-        {"rules_advice": "advise_rules_with_llm", "adjudicate": "adjudicate_with_llm"},
+        {
+            "rules_advice": "advise_rules_with_llm",
+            "direct_plan": "plan_turn_from_routing",
+            "adjudicate": "adjudicate_with_llm",
+        },
     )
     graph.add_edge("advise_rules_with_llm", "adjudicate_with_llm")
+    graph.add_edge("plan_turn_from_routing", "ensure_resolution_tools")
     graph.add_edge("adjudicate_with_llm", "ensure_resolution_tools")
     graph.add_edge("ensure_resolution_tools", "execute_deterministic_tools")
-    graph.add_edge("execute_deterministic_tools", "direct_scenario_with_llm")
+    graph.add_conditional_edges(
+        "execute_deterministic_tools",
+        route_after_tools_for_scenario,
+        {
+            "surface_selector": "select_scenario_surface_with_llm",
+            "scenario_director": "direct_scenario_with_llm",
+        },
+    )
+    graph.add_conditional_edges(
+        "select_scenario_surface_with_llm",
+        route_after_surface_selector,
+        {
+            "scenario_director": "direct_scenario_with_llm",
+            "apply_patches": "apply_world_patch_results",
+        },
+    )
     graph.add_edge("direct_scenario_with_llm", "apply_world_patch_results")
     graph.add_edge("apply_world_patch_results", "narrate_with_llm")
     graph.add_conditional_edges(
@@ -3990,10 +4527,13 @@ def build_turn_graph_with_model(
         {
             "parallel_review": "review_and_curate_parallel",
             "critic_guardrail": "critic_guardrail_with_llm",
+            "local_review": "critic_guardrail_locally",
         },
     )
     graph.add_edge("critic_guardrail_with_llm", "curate_memory_with_llm")
     graph.add_edge("curate_memory_with_llm", "persist_memory_curation")
+    graph.add_edge("critic_guardrail_locally", "curate_memory_locally")
+    graph.add_edge("curate_memory_locally", "persist_memory_curation")
     graph.add_edge("review_and_curate_parallel", "persist_memory_curation")
     graph.add_edge("persist_memory_curation", "persist_turn")
     graph.add_edge("persist_turn", END)

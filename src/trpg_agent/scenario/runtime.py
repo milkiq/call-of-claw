@@ -18,6 +18,7 @@ def sync_scene_details_for_scenario(state: dict, scenario: CompiledScenario) -> 
         "id": state["active_scene"],
         "title": scene.title,
         "public_summary": scene.public_summary,
+        "visible_surfaces": [surface.model_dump() for surface in scene.visible_surfaces],
         "transitions": [transition.model_dump() for transition in scene.transitions],
     }
     state["endings"] = {

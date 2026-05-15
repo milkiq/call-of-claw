@@ -1,0 +1,145 @@
+schema_version: 1
+id: black_tide_beacon_compiled
+package_id: black_tide_beacon
+initial_scene: harbor_road
+opening: >
+  暴雨把海边公路冲成一条发亮的黑线。旧灯塔的灯每隔十三秒闪一次，但光束偏离海面，
+  扫向一间废弃守灯人小屋。委托人说天文学家玛拉·沃斯博士昨夜从这里发出最后一段
+  失真的无线电。你站在车灯和海雾之间，第一步要做什么？
+initial_state:
+  active_scene: harbor_road
+  clock:
+    id: black_tide_pressure
+    value: 0
+    max: 5
+  revealed_facts: []
+  known_clues: []
+  npc_stance: {}
+patch_allowlist:
+  - [active_scene]
+  - [clock, value]
+  - [revealed_facts]
+  - [known_clues]
+  - [npc_stance, "*"]
+gm_constraints:
+  - Reveal the mystery through observable clues before explaining causes.
+  - The black meteorite, the mind beneath the sea, and Voss's full intent are GM-only until clues establish them.
+  - Use sanity pressure for unnatural sensory contradictions, not for arbitrary loss of player control.
+  - "Keep the scenario playable in roughly one hour: each scene should offer a clue, a risk, and a next route."
+scenes:
+  harbor_road:
+    title: Road Above the Black Tide
+    public_summary: >
+      Rain lashes the coastal road. The old beacon flashes off-course, the keeper's cottage is dark,
+      and tire tracks end near a path down to the rocks.
+    visible_surfaces:
+      - id: off_course_flash
+        text: The beacon flashes every thirteen seconds, but its beam points toward the cottage rather than the sea.
+        tags: [observation, clue, beacon, spot_hidden]
+        one_shot: true
+      - id: cottage_radio_hiss
+        text: A faint radio hiss leaks from the keeper's cottage whenever the beacon turns.
+        tags: [observation, clue, listen, radio]
+        one_shot: true
+      - id: slick_rock_path
+        text: Tire tracks stop beside a slick footpath descending toward the rocks below the beacon.
+        tags: [observation, route, luck, danger]
+        one_shot: true
+    gm_only:
+      - The beam is being redirected by a salt-crusted mirror in the beacon house.
+      - The radio hiss repeats part of Voss's last message backward.
+      - A failed Luck or Dexterity check on the rock path can advance black_tide_pressure.
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: The storm and tide worsen while the investigator delays outside.
+    transitions:
+      - to: beacon_house
+        when: The player follows the beam, enters the cottage, approaches the tower, repairs radio access, or investigates the beacon mechanism.
+        result_bands: [success, hard_success, extreme_success, critical_success]
+        action_keywords: [beacon, cottage, tower, radio, repair, 灯塔, 小屋, 无线电, 修理]
+      - to: tide_cave
+        when: The player follows the rock path down toward the tide cave or searches the rocks below.
+        result_bands: [success, hard_success, extreme_success, critical_success]
+        action_keywords: [rocks, cave, tide, path, 海蚀洞, 岩石, 潮水, 小径]
+  beacon_house:
+    title: Lantern Room and Radio Desk
+    public_summary: >
+      Inside the beacon house, a salt-crusted mirror has been bolted beside the lens. A radio desk
+      is covered with wet star charts, and a locked service hatch leads below.
+    visible_surfaces:
+      - id: salt_mirror
+        text: A salt-crusted mirror redirects the beacon lens toward the keeper's cottage.
+        tags: [observation, clue, mechanical_repair, beacon]
+        one_shot: true
+      - id: wet_star_charts
+        text: Wet star charts mark a pattern that does not match the current sky.
+        tags: [observation, clue, library_use, occult]
+        one_shot: true
+      - id: voss_recording
+        text: The radio stores a damaged recording of a woman whispering numbers between bursts of surf.
+        tags: [observation, clue, listen, psychology]
+        one_shot: true
+      - id: service_hatch
+        text: A locked service hatch below the desk is scratched from the inside.
+        tags: [route, danger, stealth, mechanical_repair]
+        one_shot: true
+    gm_only:
+      - The star pattern is a tide schedule encoded as a false constellation.
+      - "Repairing the radio reveals Voss repeating: It answers through the stone under the water."
+      - Opening the hatch reveals the old maintenance stair to the tide cave.
+      - A failed sanity check may make the recorded numbers seem to match the investigator's birthday.
+    default_gm_move:
+      type: reveal
+      amount: 1
+      reason: Careful investigation inside the beacon house should surface one concrete clue.
+    transitions:
+      - to: tide_cave
+        when: The player opens the service hatch, follows the encoded tide route, tracks Voss below, or descends under the beacon.
+        result_bands: [success, hard_success, extreme_success, critical_success]
+        action_keywords: [hatch, descend, below, cave, tide, service, 舱口, 下方, 海蚀洞, 潮水]
+  tide_cave:
+    title: Cave Under the Beacon
+    public_summary: >
+      The retreating tide exposes a basalt cave under the tower. Black water pulses in shallow
+      pools, and someone has arranged radio wire around a stone shape under a tarp.
+    visible_surfaces:
+      - id: wire_circle
+        text: Radio wire has been arranged in a careful circle around a tarp-covered stone shape.
+        tags: [observation, clue, occult, mechanical_repair]
+        one_shot: true
+      - id: voss_alive
+        text: Dr. Voss is alive, exhausted, and protective of the apparatus.
+        tags: [npc, psychology, persuade, clue]
+        one_shot: true
+      - id: impossible_echo
+        text: The cave echoes your last sentence before you finish speaking.
+        tags: [sanity, unnatural, clue]
+        one_shot: true
+      - id: rising_tide
+        text: The tide is turning back into the cave faster than it should.
+        tags: [danger, luck, opposed, escape]
+        one_shot: false
+    gm_only:
+      - The tarp hides a black meteorite that reflects radio signals and thoughts.
+      - Voss wants to transmit one final answer to the thing she believes is listening under the sea.
+      - Destroying the wire circle closes the signal but risks trapping Voss's notes under the tide.
+      - Persuading Voss requires acknowledging her discovery without promising to continue the signal.
+    default_gm_move:
+      type: clock_tick
+      amount: 1
+      reason: The black tide rises while the final choice is delayed.
+    transitions: []
+endings:
+  seal_signal:
+    when: The player disables the wire circle or beacon relay and leaves with at least one established clue.
+    summary: The signal is sealed for now, though the sea keeps the rhythm.
+  rescue_astronomer:
+    when: The player persuades or physically rescues Voss before the pressure clock fills.
+    summary: Voss survives, shaken and unwilling to fully deny what answered her.
+  answer_the_tide:
+    when: The player deliberately transmits a reply through the stone.
+    summary: The investigator gains a terrible answer and the ending becomes darker.
+  retreat_with_fragments:
+    when: The player withdraws with partial evidence before resolving the apparatus.
+    summary: The investigator escapes with fragments, leaving the main signal unresolved.

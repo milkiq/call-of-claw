@@ -725,8 +725,13 @@ Acceptance:
 
 Goal: Run only the advisors that a turn actually needs.
 
-Current status: experimental. Micro-gates and compact contracts exist, but true online tests showed
-provider timeouts and no reliable wall-clock win. The runtime still needs a safer scheduling model.
+Current status: first safe slice implemented for the `fast` profile. Conditional advisor mode now
+keeps the normal router, but can build a direct low-risk turn plan from structured routing output,
+select package-authorized visible scene surfaces for low-risk observation turns, skip scenario
+direction when runtime/routing says no scenario intelligence is needed, and use local critic/memory
+review when no resolver result, scenario patch, tool result, hidden-content risk, or pending rules
+opportunity is present. Micro-gates and compact contracts remain explicit A/B experiments because
+true online tests showed provider timeouts and no reliable wall-clock win.
 
 Implementation work:
 
@@ -738,26 +743,52 @@ Implementation work:
   - scene transition;
   - boundary or authority risk;
   - high-risk output review.
+  - Partially done through `turn_complexity` trace metadata built from structured routing, turn
+    plan, resolver, scenario, and rule-opportunity state.
 - Build a fast path for safe observation and direct answers: lightweight router, Archivist packet,
   Narrator, and deterministic lint.
+  - Done for structured low-risk answer, rules-query, memory-recall, and free-action routes that do
+    not require rules resolution or scenario direction.
+- Add a package-owned visible-surface selector before full scenario direction.
+  - Done for the `fast` profile. The selector receives only active-scene `visible_surfaces`,
+    structured routing, turn-plan summary, and public/revealed scene state; invalid or uncertain
+    selector output falls back to the full scenario director. Malformed optional selector output can
+    recover with the first package-authorized visible surface and records `selector_error` without
+    weakening visibility boundaries.
+- Skip scenario direction only when programmatic runtime checks or structured routing show it is not
+  needed.
+  - Done with `scenario_director` skip reasons for no durable runtime, no loaded scenario,
+    clarification/boundary turns, failed required resolution, conditional visible-surface
+    selection, and routes that do not need scenario intelligence.
 - Keep full critic mandatory for resolver results, hidden-context exposure, scenario patches,
   boundary repairs, and any high-risk output.
+  - Done for the implemented fast slice: those states continue to the full LLM advisor path.
 - Trigger memory curation on durable events, scene changes, explicit player preference updates, or
   fixed turn intervals, rather than every low-impact turn.
+  - Partially done by using local no-write curation for low-risk turns without durable events.
 - Persist the skip reason for every advisor that does not run.
+  - Done for the current skips: `core_gm`, `scenario_director`, `critic_guardrail`, and
+    `memory_curator`.
 
 Verification:
 
 - Fixture tests for each complexity profile and advisor skip reason.
+  - Started with low-risk direct plan, visible-surface selector, selector fallback, and
+    risky-action full-path regression tests.
 - Online 2-5 turn A/B comparing advisor call counts, fallback count, clarification rate, and quality
   score.
+  - Required before promoting conditional scheduling beyond the `fast` profile.
 - Regression tests for risky action resolver enforcement under fast path.
+  - Done for the current direct-plan bypass guard.
 
 Acceptance:
 
 - Safe observation turns use fewer LLM calls than the full path.
+  - Done in graph tests; live wall-clock benefit remains provider-dependent and must be measured.
 - Resolver bypass, hidden leaks, and unsupported facts remain at zero in regression and live smoke.
+  - Regression guard exists for resolver bypass; live smoke remains required.
 - Trace explains why each advisor ran or was skipped.
+  - Done for implemented skip paths through `advisor_skip_reasons`.
 
 ## Milestone 17: Archivist/Narrator Split
 
@@ -863,8 +894,33 @@ Acceptance:
 
 Goal: Make new rulesets easier to add without widening core graph logic.
 
-Current status: resolver families and package-owned rules exist. The boundary should become more
-explicit and plugin-oriented before adding many real rulesets.
+Current status: initial ruleset-owned plugin support is implemented through `rules_dsl_v1`.
+Compiled rulesets may reference a package-local `plugin.yaml`, rules advisors may select loaded
+procedure/check/difficulty ids, and the resolver dispatches through the package plugin before
+falling back to legacy built-in resolver families. `coc7_light_investigation` and
+`black_tide_beacon` exercise multiple attributes, skills, difficulty levels, pushed checks, sanity,
+luck, and pressure clocks. Remaining work is to harden the lifecycle into explicit prepare /
+resolve / explain-public phases and add a non-target-number ruleset.
+
+Flow before this milestone:
+
+1. The core graph loaded a compiled ruleset and selected a built-in resolver family such as a
+   threshold or sum resolver.
+2. Rules-specific behavior could only grow by adding resolver code or by stretching generic
+   resolver fields.
+3. Scenario/rules tests were easy to add, but a new game with a materially different procedure
+   risked pushing game-specific interpretation into the graph.
+
+Flow after the first plugin implementation:
+
+1. Play startup resolves the active ruleset/scenario, preloads package profiles and compiled
+   package data, and warms the indexed content store.
+2. The rules advisor can only request procedure/check/difficulty ids available in the loaded
+   ruleset package.
+3. The resolver loads the ruleset-owned plugin, validates requested ids/modifiers, performs
+   deterministic dice through the shared dice tool, and emits a consequence envelope.
+4. Narration consumes validated tool results and package context; it does not invent rules
+   consequences or inspect ruleset-specific keywords in core graph code.
 
 Implementation work:
 
@@ -959,8 +1015,8 @@ Implementation work:
 - Add `--profile fast|balanced|theatrical` to `trpg play` and online eval.
   - Done.
 - Define profile defaults:
-  - `fast`: stable multi-advisor path, legacy contracts, parallel review, enforced context
-    budgeting, fast runtime budget;
+  - `fast`: stable multi-advisor path, conditional low-risk advisor skips, legacy contracts,
+    parallel review, enforced context budgeting, fast runtime budget;
   - `balanced`: stable multi-advisor path, legacy contracts, shadow context budgeting, balanced
     runtime budget;
   - `theatrical`: legacy contracts and theatrical runtime budget, ready for future style work.

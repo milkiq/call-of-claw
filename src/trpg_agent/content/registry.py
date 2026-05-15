@@ -130,6 +130,8 @@ class ContentRegistry:
                     issues.append(f"{package.id}: reference escapes project root: {reference.id}")
                 if "compiled" in reference.tags and path.exists():
                     issues.extend(_validate_compiled_reference(package.id, reference.id, path))
+                if "plugin" in reference.tags and path.exists():
+                    issues.extend(_validate_plugin_reference(package.id, reference.id, path))
             reference_ids = {reference.id for reference in package.manifest.references}
             for prompt in package.manifest.extension_prompts:
                 if prompt.reference_id not in reference_ids:
@@ -156,5 +158,30 @@ def _validate_compiled_reference(
         issues.append(
             f"{package_id}: compiled reference {reference_id} package_id mismatch "
             f"({raw.get('package_id')})"
+        )
+    return issues
+
+
+def _validate_plugin_reference(
+    package_id: str,
+    reference_id: str,
+    path: Path,
+) -> list[str]:
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as error:
+        return [f"{package_id}: plugin reference {reference_id} cannot be read: {error}"]
+    issues: list[str] = []
+    if raw.get("schema_version") != 1:
+        issues.append(f"{package_id}: plugin reference {reference_id} must use schema_version 1")
+    if raw.get("package_id") != package_id:
+        issues.append(
+            f"{package_id}: plugin reference {reference_id} package_id mismatch "
+            f"({raw.get('package_id')})"
+        )
+    if raw.get("driver") not in {"rules_dsl_v1"}:
+        issues.append(
+            f"{package_id}: plugin reference {reference_id} unsupported driver "
+            f"({raw.get('driver')})"
         )
     return issues

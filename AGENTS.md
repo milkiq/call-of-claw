@@ -24,6 +24,9 @@ long-play evaluation, and user-facing play profiles.
 - Ruleset-specific adjudication belongs in compiled ruleset packages and resolver extensions.
 - Scenario-specific GM requirements, secrets, scenes, clocks, NPCs, clues, and endings belong in
   compiled scenario packages.
+- Scenario fast paths may expose only package-owned public fields such as compiled
+  `visible_surfaces`; they must not derive hidden reveals, transitions, consequences, clocks, or
+  clues from player-input keywords.
 - GM style, table tone, and NPC voice are style state or package data. They must not authorize
   durable facts, world changes, hidden reveals, rule effects, or player decisions.
 - LLM output is advisory until validated by structured schemas and deterministic tools. Durable
@@ -48,12 +51,20 @@ long-play evaluation, and user-facing play profiles.
 - Do not solve latency by weakening resolver, visibility, critic, or durable-state boundaries.
   Optimize through profiling, context budgeting, indexed retrieval, conditional advisors, and
   provider-friendly stable prefixes first.
+- Conditional advisor skips must be based on structured advisor outputs plus validated graph state,
+  never raw player-input keyword checks. Every skipped advisor must leave a machine-readable skip
+  reason in trace/state, and resolver results, scenario patches, hidden-content exposure risk, and
+  pending rules opportunities must stay on the full safety path.
 - Before changing context budgets, retrieval, advisor scheduling, or provider settings, inspect
   `trpg eval observation-report` so optimization work is tied to measured slow nodes, prompt size,
   fallback counts, and timeout counts.
 - User-facing play configuration should go through `--profile fast|balanced|theatrical` and
   `--local`; do not re-expose low-level experiment flags on `trpg play` unless they are promoted to
   documented profile behavior.
+- Eval and development smoke tests must not leave playable test sessions in the default local
+  database unless a human explicitly needs to inspect that session. Use `--keep-session` only for
+  deliberate retention, and otherwise rely on eval command cleanup or run
+  `.venv/bin/trpg session cleanup-tests --yes` after tests.
 
 ## Required Checks
 

@@ -11,6 +11,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from trpg_agent.app.config import AppConfig
 from trpg_agent.eval.judge import run_llm_judge
 from trpg_agent.eval.scorecard import EvalFinding, EvalResult, EvalScorecard, score_from_findings
+from trpg_agent.eval.session_cleanup import cleanup_metadata, cleanup_sessions
 from trpg_agent.graph.runtime import durable_turn_graph, invoke_turn_graph
 from trpg_agent.memory.store import SqliteStore
 
@@ -40,6 +41,7 @@ def run_live_eval(
     persist: bool = True,
     model_metadata: dict[str, str] | None = None,
     case_path: Path | None = None,
+    cleanup_session: bool = False,
 ) -> EvalResult:
     path = case_path or config.root_dir / "tests" / "live_eval_cases" / "smoke.yaml"
     cases = load_live_eval_cases(path)[: max(0, limit)]
@@ -179,6 +181,21 @@ def run_live_eval(
             **(model_metadata or {}),
         },
     )
+    if cleanup_session:
+        store = SqliteStore(config.sqlite_path)
+        store.migrate()
+        result.metadata.update(
+            cleanup_metadata(
+                cleanup_sessions(
+                    store=store,
+                    sqlite_path=config.sqlite_path,
+                    session_ids=[
+                        f"{run_session_prefix}-{index}"
+                        for index in range(1, len(cases) + 1)
+                    ],
+                )
+            )
+        )
     if persist:
         store = SqliteStore(config.sqlite_path)
         store.migrate()

@@ -67,6 +67,7 @@ class CompiledRuleset(BaseModel):
     id: str
     package_id: str
     resolver_id: str
+    plugin_ref: str | None = None
     default_target: int
     default_approach: str | None = None
     dice: DiceSpec
@@ -75,6 +76,7 @@ class CompiledRuleset(BaseModel):
     bands: dict[str, ResolutionBand]
     gm_constraints: list[str] = Field(default_factory=list)
     default_character_context: dict = Field(default_factory=dict)
+    rules_model: dict[str, Any] = Field(default_factory=dict)
     character_creation: CharacterCreationSpec = Field(default_factory=CharacterCreationSpec)
 
     def band_for_successes(self, successes: int) -> ResolutionBand:
@@ -109,9 +111,17 @@ class SceneTransition(BaseModel):
     action_keywords: list[str] = Field(default_factory=list)
 
 
+class VisibleSurfaceSpec(BaseModel):
+    id: str
+    text: str
+    tags: list[str] = Field(default_factory=list)
+    one_shot: bool = True
+
+
 class CompiledScene(BaseModel):
     title: str
     public_summary: str
+    visible_surfaces: list[VisibleSurfaceSpec] = Field(default_factory=list)
     gm_only: list[str] = Field(default_factory=list)
     default_gm_move: ScenarioMove | None = None
     transitions: list[SceneTransition] = Field(default_factory=list)

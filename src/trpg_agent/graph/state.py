@@ -20,10 +20,12 @@ class GraphState(TypedDict, total=False):
     context_budget_mode: str
     eval_smoke_mode: bool
     parallel_review_mode: bool
+    conditional_advisors_mode: bool
     single_turn_advisor_mode: bool
     micro_gates_mode: bool
     advisor_contract_mode: str
     runtime_metadata: dict[str, Any]
+    runtime_preload: dict[str, Any]
     checkpoint_mode: str
     replayed_turn: bool
     world_projection: dict[str, Any]
@@ -35,8 +37,11 @@ class GraphState(TypedDict, total=False):
     player_memory_hits: list[dict[str, Any]]
     package_profiles: list[dict[str, Any]]
     routing_decision: dict[str, Any]
+    turn_complexity: dict[str, Any]
+    advisor_skip_reasons: dict[str, str]
     rules_advice: dict[str, Any]
     scenario_director: dict[str, Any]
+    scenario_surface_selector: dict[str, Any]
     intent: dict[str, Any]
     authority_result: dict[str, Any]
     turn_plan: dict[str, Any]
